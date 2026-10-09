@@ -1,12 +1,12 @@
 # Abhivyakti
 
-A real-time Indian Sign Language (ISL) learning and interpretation project.
+Abhivyakti is a real-time Indian Sign Language (ISL) learning and interpretation project.
 
 ## Project structure
 
-- `backend/` — FastAPI backend and ML integration.
-- `frontend/` — React Native + Expo mobile application.
+- `backend/` â€” FastAPI backend and ML integration.
+- `frontend/` â€” React Native + Expo mobile application.
 
 ## Team workflow
 
-Work inside your assigned folder and coordinate changes with the team.
+Team members should work in their assigned folders and coordinate changes through GitHub.
