@@ -1,14 +1,39 @@
-.env
-.env.*
-!.env.example
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.DS_Store
+# ===== Node / Expo =====
 node_modules/
 .expo/
 dist/
-build/
+web-build/
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# ===== Python =====
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# ===== Env & secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== ML artifacts & datasets (per blueprint §8) =====
+*.pt
+*.pth
+*.h5
+*.onnx
+*.pkl
+*.joblib
+datasets/
+models/
+*.ckpt
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
