@@ -29,27 +29,30 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-router",
-      "expo-font",
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "Allow Abhivyakti to access photos to recognize signs."
-        }
-      ],
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow Abhivyakti to use the camera to recognize signs."
-        }
-      ]
-    ],
-    "experiments": {
-      "typedRoutes": true
-    },
-    "extra": {
-      "apiUrl": "http://127.0.0.1:8000"
+"plugins": [
+  "expo-router",
+  "expo-font",
+  [
+    "expo-image-picker",
+    {
+      "photosPermission": "Allow Abhivyakti to access photos to recognize signs."
     }
+  ],
+  [
+    "expo-camera",
+    {
+      "cameraPermission": "Allow Abhivyakti to use the camera to recognize signs."
+    }
+  ],
+  [
+    "expo-build-properties",
+    {
+      "android": {
+        "minSdkVersion": 26
+      }
+    }
+  ],
+  "react-native-fast-tflite"
+]
   }
 }
