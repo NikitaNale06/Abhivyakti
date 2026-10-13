@@ -1,0 +1,13 @@
+{
+  "model_input_dimension": 130,
+  "number_of_classes": 35,
+  "input_dtype": "float32",
+  "output": "class probabilities (softmax)",
+  "preprocessing": "MediaPipe landmarks -> 130 features -> StandardScaler using isl_scaler.json",
+  "labels_file": "isl_labels.json",
+  "models": {
+    "float": "isl_landmark_model.tflite",
+    "float16_weights": "isl_landmark_model_fp16.tflite"
+  },
+  "note": "The TFLite classifier does not include camera capture or MediaPipe hand landmark detection."
+}
