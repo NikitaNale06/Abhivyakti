@@ -21,8 +21,12 @@ const FEATURES_PER_HAND = NUM_LANDMARKS * 3; // 63
 
 /**
  * Normalize one hand's landmarks:
- *   - Wrist (landmark 0) is origin
- *   - Divide by distance(wrist, landmark 9)
+ *   - Wrist (landmark 0) becomes the origin
+ *   - Scale by distance(wrist, middle-finger MCP = landmark 9)
+ *   - Result is rotation/scale-invariant hand shape
+ *
+ * NOTE: The image is already flipped horizontally (front-cam mirror corrected)
+ * before reaching here, so no additional x-negation is needed.
  */
 function normalizeHand(landmarks: HandLandmarks): number[] {
   const wrist = landmarks[0];

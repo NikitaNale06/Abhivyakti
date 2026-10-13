@@ -3,7 +3,7 @@ import { getClassifier } from './tfliteModels';
 import { applyScaler } from './islScaler';
 
 const LABELS: string[] = labelsData.classes;
-const CONFIDENCE_THRESHOLD = 0.6;
+const CONFIDENCE_THRESHOLD = 0.35;
 
 export interface Prediction {
   sign: string;

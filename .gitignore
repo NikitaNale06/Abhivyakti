@@ -29,7 +29,9 @@ __pycache__/
 *.pkl
 *.joblib
 datasets/
-models/
+/models/
+!frontend/assets/models/
+!frontend/assets/models/*
 *.ckpt
 
 # ===== IDE / OS =====
