@@ -21,13 +21,31 @@ import { saveHistoryEntry } from '@/services/storage';
 import HandLandmarkOverlay from '@/components/HandLandmarkOverlay';
 import type { Landmark } from '@/services/landmarks';
 
-const CAPTURE_INTERVAL_MS = 2000;
+const LOOP_DELAY_MS = 1;
+
+// Stability filter (same idea as the Python script)
+const STABLE_FRAMES = 7; // same label this many frames in a row
+const MIN_CONF = 0.4; // minimum confidence to count a frame
+const MAX_MISSED_FRAMES = 2; // tolerate brief detection drop-outs
+
+// Set to true if signs come out mirrored vs. your Python training pipeline
+// (test with an asymmetric sign / two-hand sign order).
+const MIRROR_X = false;
 
 interface SimpleResult {
   sign: string;
   confidence: number;
   alternatives: { sign: string; confidence: number }[];
 }
+
+interface StableState {
+  sign: string;
+  count: number;
+  locked: boolean;
+  missed: number;
+}
+
+const freshStable = (): StableState => ({ sign: '', count: 0, locked: false, missed: 0 });
 
 export default function Recognize() {
   const { colors } = useTheme();
@@ -37,12 +55,13 @@ export default function Recognize() {
 
   const [active, setActive] = useState(false);
   const busyRef = useRef(false);
+  const stableRef = useRef<StableState>(freshStable());
   const [lastResult, setLastResult] = useState<SimpleResult | null>(null);
   const [word, setWord] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('Idle');
   const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [landmarks, setLandmarks] = useState<Landmark[] | null>(null);
+  const [handsLandmarks, setHandsLandmarks] = useState<Landmark[][]>([]);
   const [cameraDims, setCameraDims] = useState({ width: 0, height: 0 });
 
   const [ready, setReady] = useState(false);
@@ -95,11 +114,21 @@ export default function Recognize() {
     };
   }, []);
 
-  // Run inference loop using setTimeout chains (avoids interval drift + race conditions)
+  // Inference loop (setTimeout chain avoids interval drift + overlapping runs)
   useEffect(() => {
     if (!active || !permission?.granted || !ready) return;
 
     let cancelled = false;
+    stableRef.current = freshStable();
+
+    // Called when there is no usable frame result (no hand / unclear sign).
+    const registerMiss = () => {
+      const s = stableRef.current;
+      s.missed += 1;
+      if (s.missed > MAX_MISSED_FRAMES) {
+        stableRef.current = freshStable(); // hand really left: allow same letter again
+      }
+    };
 
     const runLoop = async () => {
       if (cancelled) return;
@@ -108,46 +137,69 @@ export default function Recognize() {
         busyRef.current = true;
         startPulse();
         try {
-          const photoRef = await cameraRef.current.takePictureAsync({
+          const photo = (await cameraRef.current.takePictureAsync({
             base64: false,
-            quality: 0.5,
+            quality: 0.8,
             skipProcessing: true,
-          } as any);
-          const photo = photoRef as any;
+          } as any)) as any;
 
           if (!photo?.uri) {
             setStatus('Capture failed');
           } else {
-            const { detectHands } = await import('@/services/handDetector');
+            const { detectHandsWithSize } = await import('@/services/handDetector');
             const { extract130Features } = await import('@/services/landmarks');
             const { classify } = await import('@/services/classifier');
 
-            const hands = await detectHands(photo.uri);
+            const { hands, frameWidth, frameHeight } = await detectHandsWithSize(photo.uri);
+            if (cancelled) return;
+
             if (hands.length === 0) {
               setStatus('No hand detected');
-              setLandmarks(null);
+              setHandsLandmarks([]);
+              registerMiss();
             } else {
-              // Show landmarks from first detected hand
-              setLandmarks(hands[0].landmarks);
+              setHandsLandmarks(hands.map((h) => h.landmarks));
 
-              const features = extract130Features(hands);
+              // Optional mirror fix for features only (overlay stays as captured)
+              const featHands = MIRROR_X
+                ? hands.map((h) => ({
+                  ...h,
+                  landmarks: h.landmarks.map((l) => ({ ...l, x: 1 - l.x })),
+                }))
+                : hands;
+
+              const features = extract130Features(featHands, frameWidth, frameHeight);
               const prediction = await classify(features);
 
-              if (!prediction) {
-                setStatus(`Hand detected · Sign unclear`);
+              if (!prediction || prediction.confidence < MIN_CONF) {
+                setStatus(`${hands.length} hand(s) · Sign unclear`);
+                registerMiss();
               } else {
-                setStatus(
-                  `${prediction.sign}  ${(prediction.confidence * 100).toFixed(0)}%`,
-                );
-                setLastResult(prediction);
-                setWord((w) => (w + prediction.sign).slice(-40));
+                const s = stableRef.current;
+                if (s.sign === prediction.sign) {
+                  s.count += 1;
+                  s.missed = 0;
+                } else {
+                  stableRef.current = { sign: prediction.sign, count: 1, locked: false, missed: 0 };
+                }
 
-                await saveHistoryEntry({
-                  id: `${Date.now()}-${prediction.sign}`,
-                  sign: prediction.sign,
-                  confidence: prediction.confidence,
-                  timestamp: Date.now(),
-                });
+                const cur = stableRef.current;
+                setLastResult(prediction);
+                setStatus(
+                  `${prediction.sign} · ${(prediction.confidence * 100).toFixed(0)}% · ` +
+                  `${Math.min(cur.count, STABLE_FRAMES)}/${STABLE_FRAMES}${cur.locked ? ' ✓' : ''}`,
+                );
+
+                if (cur.count >= STABLE_FRAMES && !cur.locked) {
+                  cur.locked = true; // add once per hold
+                  setWord((w) => (w + prediction.sign).slice(-40));
+                  await saveHistoryEntry({
+                    id: `${Date.now()}-${prediction.sign}`,
+                    sign: prediction.sign,
+                    confidence: prediction.confidence,
+                    timestamp: Date.now(),
+                  });
+                }
               }
             }
           }
@@ -161,7 +213,7 @@ export default function Recognize() {
       }
 
       if (!cancelled) {
-        intervalRef.current = setTimeout(runLoop, CAPTURE_INTERVAL_MS);
+        intervalRef.current = setTimeout(runLoop, LOOP_DELAY_MS);
       }
     };
 
@@ -174,6 +226,7 @@ export default function Recognize() {
         intervalRef.current = null;
       }
       busyRef.current = false;
+      stableRef.current = freshStable();
       stopPulse();
     };
   }, [active, permission?.granted, ready, startPulse, stopPulse]);
@@ -224,7 +277,6 @@ export default function Recognize() {
     <Screen edges={['top']}>
       <ScrollView
         contentContainerStyle={{ padding: spacing.xl, paddingBottom: spacing.xxxl }}
-        // Prevent scroll re-render from triggering camera flicker
         removeClippedSubviews={false}
       >
         <Text style={[typography.h1, { color: colors.textPrimary }]}>Recognize</Text>
@@ -232,11 +284,13 @@ export default function Recognize() {
           Offline · On-device · {language.name}
         </Text>
 
-        {/* Camera + live indicator */}
         <View
           style={[
             styles.cameraWrap,
-            { borderColor: active ? colors.primary : colors.border, backgroundColor: colors.backgroundSecondary },
+            {
+              borderColor: active ? colors.primary : colors.border,
+              backgroundColor: colors.backgroundSecondary,
+            },
           ]}
           onLayout={(e: LayoutChangeEvent) => {
             const { width, height } = e.nativeEvent.layout;
@@ -252,39 +306,29 @@ export default function Recognize() {
             flash="off"
           />
 
-          {/* Landmark skeleton overlay */}
-          {landmarks && cameraDims.width > 0 && (
-            <HandLandmarkOverlay
-              landmarks={landmarks}
-              width={cameraDims.width}
-              height={cameraDims.height}
-            />
-          )}
-
-          {/* Recording pulse dot */}
-          {active && (
-            <View style={styles.recordingDot}>
-              <Animated.View
-                style={[styles.dot, { opacity: dotOpacity, backgroundColor: colors.primary }]}
+          {cameraDims.width > 0 &&
+            handsLandmarks.map((lms, i) => (
+              <HandLandmarkOverlay
+                key={i}
+                landmarks={lms}
+                width={cameraDims.width}
+                height={cameraDims.height}
               />
-            </View>
-          )}
+            ))}
+
+          <Animated.View style={[styles.recordingDot, { opacity: dotOpacity }]}>
+            <View style={[styles.dot, { backgroundColor: colors.primary }]} />
+          </Animated.View>
         </View>
 
-        <View style={{ marginTop: spacing.lg, gap: spacing.md }}>
+        <View style={{ marginTop: spacing.lg }}>
           <Button
-            label={active ? 'Stop' : 'Start Recognizing'}
-            onPress={() => {
-              setActive((a) => !a);
-              if (active) setStatus('Stopped');
-            }}
-            variant={active ? 'secondary' : 'primary'}
+            label={active ? 'Stop' : 'Start'}
+            onPress={() => setActive((a) => !a)}
             disabled={!ready}
-            fullWidth
           />
         </View>
 
-        {/* Status box — fixed height prevents layout shift */}
         <View
           style={[
             styles.statusBox,
@@ -300,7 +344,6 @@ export default function Recognize() {
           </Text>
         </View>
 
-        {/* Result box — always rendered, just shows placeholder when empty */}
         <View
           style={[
             styles.resultBox,
@@ -312,9 +355,7 @@ export default function Recognize() {
           </Text>
           {lastResult ? (
             <>
-              <Text
-                style={[typography.display, { color: colors.textPrimary, marginTop: 4 }]}
-              >
+              <Text style={[typography.display, { color: colors.textPrimary, marginTop: 4 }]}>
                 {lastResult.sign}
               </Text>
               <Text style={[typography.caption, { color: colors.textSecondary }]}>
@@ -332,13 +373,10 @@ export default function Recognize() {
               )}
             </>
           ) : (
-            <Text style={[typography.body, { color: colors.textMuted, marginTop: 4 }]}>
-              —
-            </Text>
+            <Text style={[typography.body, { color: colors.textMuted, marginTop: 4 }]}>—</Text>
           )}
         </View>
 
-        {/* Word builder — always rendered, zero height when empty */}
         <View
           style={[
             styles.wordBox,
@@ -381,16 +419,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   camera: { flex: 1 },
-  recordingDot: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
+  recordingDot: { position: 'absolute', top: 12, right: 12 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
   statusBox: {
     marginTop: spacing.lg,
     padding: spacing.md,

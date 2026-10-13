@@ -1,0 +1,27 @@
+{
+  "feature_dim": 130,
+  "feature_version": 2,
+  "input_dtype": "float32",
+  "output": "softmax probabilities",
+  "tflite_models": [
+    "isl_landmark_model.tflite",
+    "isl_landmark_model_fp16.tflite",
+    "isl_landmark_model_dynamic.tflite"
+  ],
+  "landmarker": "hand_landmarker.task",
+  "scaler": "isl_scaler.json",
+  "labels": "isl_labels.json",
+  "feature_spec": [
+    "feature_version 2; 130 float32 values.",
+    "Run MediaPipe HandLandmarker (num_hands=2, detection/presence confidence 0.35) on an UNMIRRORED RGB camera frame (same orientation as the training photos).",
+    "For each hand take the 21 landmarks in pixel units: (x*W, y*H, z*W), where W,H are the width/height of the frame given to MediaPipe.",
+    "Ignore hands whose scale (below) is under 5 px. Sort hands by wrist x (left-most first). Keep at most 2.",
+    "scale = 0.5 * ( |p9 - p0|_xy + |p5 - p17|_xy ).  rel = (p - p0) / scale  (x, y, z all divided by the same scale).",
+    "Hand slot i (0 or 1) fills features[63*i : 63*i+63], landmark-major, each landmark as (x, y, z).",
+    "features[126 + i] = 1 if hand i is present, else 0.",
+    "features[128:130] = (wrist1 - wrist0)_xy / mean(scale0, scale1) when two hands are present, else 0.",
+    "Then standardise with isl_scaler.json, run the TFLite model, take the softmax output over isl_labels.json.",
+    "Suggested app logic: show a prediction only when confidence >= threshold (see the notebook's threshold table) and the same label holds for several consecutive frames."
+  ],
+  "pipeline": "camera -> MediaPipe Hands -> 130 features -> StandardScaler -> TFLite"
+}

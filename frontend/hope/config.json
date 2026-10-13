@@ -1,5 +1,6 @@
 {
   "classes": [
+    "0",
     "1",
     "2",
     "3",
@@ -36,5 +37,10 @@
     "Y",
     "Z"
   ],
-  "num_classes": 35
+  "feature_dim": 130,
+  "feature_version": 2,
+  "test_accuracy_detected_only": 0.8377083732515808,
+  "test_accuracy_end_to_end": 0.8291295277830457,
+  "overall_hand_detection_rate": 0.9491226133980797,
+  "augmentation": "none"
 }

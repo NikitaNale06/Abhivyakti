@@ -9,6 +9,13 @@ config.resolver.assetExts.push('task');
 // Ensure JSON is treated as source
 config.resolver.sourceExts.push('json');
 
+// Exclude training python & keras artifacts from Metro bundler watcher
+config.resolver.blockList = [
+  /.*\.py$/,
+  /.*\.keras$/,
+  /.*\.pkl$/,
+];
+
 // Disable strict JSON parsing (Hermes issue with large JSON)
 config.transformer = {
   ...config.transformer,
