@@ -414,6 +414,422 @@
 // }
 
 
+// import * as ImageManipulator from 'expo-image-manipulator';
+// import * as jpeg from 'jpeg-js';
+// import {
+//   getHandDetector,
+//   getLandmarksDetector,
+// } from './tfliteModels';
+// import type { HandDetection, Landmark } from './landmarks';
+
+// const DETECTOR_INPUT = 192;
+// const LANDMARK_INPUT = 224;
+// const PALM_SCORE_THRESHOLD = 0.30;
+// const LANDMARK_FLAG_THRESHOLD = 0.20;
+// const PALM_EXPANSION = 2.4;
+// const PALM_CENTER_SHIFT = 0.45;
+
+// interface Anchor {
+//   x: number;
+//   y: number;
+//   w: number;
+//   h: number;
+// }
+
+// interface PalmBox {
+//   x: number;
+//   y: number;
+//   w: number;
+//   h: number;
+//   score: number;
+//   handCenterX: number;
+//   handCenterY: number;
+//   handSize: number;
+// }
+
+// let cachedAnchors: Anchor[] | null = null;
+
+// /**
+//  * Generate 2016 SSD anchors for MediaPipe 192x192 Palm Detector.
+//  */
+// function getAnchors(): Anchor[] {
+//   if (cachedAnchors) return cachedAnchors;
+
+//   const strides = [8, 16, 16, 16];
+//   const minScale = 0.1484375;
+//   const maxScale = 0.75;
+//   const inputSize = 192;
+//   const anchors: Anchor[] = [];
+//   let layerId = 0;
+
+//   while (layerId < strides.length) {
+//     const anchorHeight: number[] = [];
+//     const anchorWidth: number[] = [];
+//     let lastSameStrideLayer = layerId;
+
+//     while (
+//       lastSameStrideLayer < strides.length &&
+//       strides[lastSameStrideLayer] === strides[layerId]
+//     ) {
+//       const scale =
+//         minScale +
+//         ((maxScale - minScale) * lastSameStrideLayer) / (strides.length - 1.0);
+//       const nextScale =
+//         lastSameStrideLayer === strides.length - 1
+//           ? 1.0
+//           : minScale +
+//             ((maxScale - minScale) * (lastSameStrideLayer + 1)) /
+//               (strides.length - 1.0);
+
+//       anchorHeight.push(scale);
+//       anchorWidth.push(scale);
+
+//       const interpScale = Math.sqrt(scale * nextScale);
+//       anchorHeight.push(interpScale);
+//       anchorWidth.push(interpScale);
+
+//       lastSameStrideLayer++;
+//     }
+
+//     const stride = strides[layerId];
+//     const featureMapW = Math.ceil(inputSize / stride);
+//     const featureMapH = Math.ceil(inputSize / stride);
+
+//     for (let y = 0; y < featureMapH; y++) {
+//       for (let x = 0; x < featureMapW; x++) {
+//         for (let aId = 0; aId < anchorWidth.length; aId++) {
+//           const xCenter = ((x + 0.5) * stride) / inputSize;
+//           const yCenter = ((y + 0.5) * stride) / inputSize;
+//           anchors.push({
+//             x: xCenter,
+//             y: yCenter,
+//             w: 1.0,
+//             h: 1.0,
+//           });
+//         }
+//       }
+//     }
+
+//     layerId = lastSameStrideLayer;
+//   }
+
+//   cachedAnchors = anchors;
+//   return anchors;
+// }
+
+// function calculateIoU(
+//   b1: { x: number; y: number; w: number; h: number },
+//   b2: { x: number; y: number; w: number; h: number },
+// ): number {
+//   const x1 = Math.max(b1.x, b2.x);
+//   const y1 = Math.max(b1.y, b2.y);
+//   const x2 = Math.min(b1.x + b1.w, b2.x + b2.w);
+//   const y2 = Math.min(b1.y + b1.h, b2.y + b2.h);
+//   const interW = Math.max(0, x2 - x1);
+//   const interH = Math.max(0, y2 - y1);
+//   const interArea = interW * interH;
+//   const unionArea = b1.w * b1.h + b2.w * b2.h - interArea;
+//   return unionArea > 0 ? interArea / unionArea : 0;
+// }
+
+// export async function detectHands(
+//   imageUri: string,
+//   imgWidth?: number,
+//   imgHeight?: number,
+// ): Promise<HandDetection[]> {
+//   const detections: HandDetection[] = [];
+
+//   try {
+//     // Determine image dimensions once
+//     let imgW = imgWidth;
+//     let imgH = imgHeight;
+//     if (!imgW || !imgH) {
+//       const info = await ImageManipulator.manipulateAsync(imageUri, [], {});
+//       imgW = info.width;
+//       imgH = info.height;
+//     }
+
+//     // ---------- Stage 1: Detect palm bounding boxes ----------
+//     const detectorInput = await imageToFloat32Normalized(imageUri, DETECTOR_INPUT, DETECTOR_INPUT);
+//     const detector = await getHandDetector();
+//     const detectorOut = await detector.run([detectorInput.buffer as ArrayBuffer]);
+
+//     const palms = decodePalmDetector(detectorOut);
+//     const landmarkModel = await getLandmarksDetector();
+
+//     for (const palm of palms) {
+//       // Calculate crop box around full hand (including extended fingers and wrist)
+//       const halfSize = palm.handSize / 2;
+//       const cropX = Math.max(0, palm.handCenterX - halfSize);
+//       const cropY = Math.max(0, palm.handCenterY - halfSize);
+//       const cropW = Math.min(1 - cropX, palm.handSize);
+//       const cropH = Math.min(1 - cropY, palm.handSize);
+
+//       if (cropW < 0.05 || cropH < 0.05) continue;
+
+//       const croppedUri = await cropImage(imageUri, cropX, cropY, cropW, cropH, imgW, imgH);
+//       const landmarkInput = await imageToFloat32Normalized(croppedUri, LANDMARK_INPUT, LANDMARK_INPUT);
+//       const landmarkOut = await landmarkModel.run([landmarkInput.buffer as ArrayBuffer]);
+
+//       const result = decodeLandmarkOutput(landmarkOut, {
+//         x: cropX,
+//         y: cropY,
+//         w: cropW,
+//         h: cropH,
+//       });
+
+//       if (result) {
+//         detections.push(result);
+//       }
+//     }
+
+//     // ---------- Fallback: center crop if no palm confirmed ----------
+//     if (detections.length === 0) {
+//       const fallbackBox = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+//       const fallbackUri = await cropImage(
+//         imageUri,
+//         fallbackBox.x,
+//         fallbackBox.y,
+//         fallbackBox.w,
+//         fallbackBox.h,
+//         imgW,
+//         imgH,
+//       );
+//       const landmarkInput = await imageToFloat32Normalized(fallbackUri, LANDMARK_INPUT, LANDMARK_INPUT);
+//       const landmarkOut = await landmarkModel.run([landmarkInput.buffer as ArrayBuffer]);
+
+//       const result = decodeLandmarkOutput(landmarkOut, fallbackBox);
+//       if (result && result.confidence >= 0.20) {
+//         detections.push(result);
+//       }
+//     }
+//   } catch (err) {
+//     console.error('[handDetector] Detection pipeline error:', err);
+//   }
+
+//   return detections;
+// }
+
+// /* ------------------------------------------------------------------ */
+
+// function decodePalmDetector(outputs: ArrayBuffer[]): PalmBox[] {
+//   if (!outputs || outputs.length < 2) {
+//     return [];
+//   }
+
+//   // Ensure regRaw is the 36288-float buffer and scoresRaw is the 2016-float buffer
+//   const buf0 = outputs[0];
+//   const buf1 = outputs[1];
+//   const regRaw = new Float32Array(buf0.byteLength > buf1.byteLength ? buf0 : buf1);
+//   const scoresRaw = new Float32Array(buf0.byteLength > buf1.byteLength ? buf1 : buf0);
+//   const anchors = getAnchors();
+
+//   const numAnchors = Math.min(anchors.length, scoresRaw.length);
+//   const candidates: PalmBox[] = [];
+
+//   for (let i = 0; i < numAnchors; i++) {
+//     const rawScore = scoresRaw[i];
+//     const score = 1 / (1 + Math.exp(-rawScore));
+//     if (score < PALM_SCORE_THRESHOLD) continue;
+
+//     const off = i * 18;
+//     if (off + 9 >= regRaw.length) continue;
+//     const anchor = anchors[i];
+
+//     // Decode center and dimensions relative to anchor
+//     const xc = (regRaw[off + 0] / 192.0) * anchor.w + anchor.x;
+//     const yc = (regRaw[off + 1] / 192.0) * anchor.h + anchor.y;
+//     const w = (regRaw[off + 2] / 192.0) * anchor.w;
+//     const h = (regRaw[off + 3] / 192.0) * anchor.h;
+
+//     // Keypoints: kp0 = wrist, kp2 = middle finger MCP
+//     const kp0x = (regRaw[off + 4] / 192.0) * anchor.w + anchor.x;
+//     const kp0y = (regRaw[off + 5] / 192.0) * anchor.h + anchor.y;
+//     const kp2x = (regRaw[off + 8] / 192.0) * anchor.w + anchor.x;
+//     const kp2y = (regRaw[off + 9] / 192.0) * anchor.h + anchor.y;
+
+//     const palmSize = Math.max(w, h);
+//     const handSize = Math.max(0.12, Math.min(0.95, palmSize * PALM_EXPANSION));
+
+//     const dirX = kp2x - kp0x;
+//     const dirY = kp2y - kp0y;
+//     const handCenterX = xc + dirX * PALM_CENTER_SHIFT;
+//     const handCenterY = yc + dirY * PALM_CENTER_SHIFT;
+
+//     candidates.push({
+//       x: xc - w / 2,
+//       y: yc - h / 2,
+//       w,
+//       h,
+//       score,
+//       handCenterX,
+//       handCenterY,
+//       handSize,
+//     });
+//   }
+
+//   candidates.sort((a, b) => b.score - a.score);
+
+//   // Non-Maximum Suppression (up to 2 hands)
+//   const selected: PalmBox[] = [];
+//   for (const cand of candidates) {
+//     if (selected.length >= 2) break;
+//     let overlap = false;
+//     for (const sel of selected) {
+//       if (calculateIoU(cand, sel) > 0.3) {
+//         overlap = true;
+//         break;
+//       }
+//     }
+//     if (!overlap) selected.push(cand);
+//   }
+
+//   return selected;
+// }
+
+// function decodeLandmarkOutput(
+//   outputs: ArrayBuffer[],
+//   crop: { x: number; y: number; w: number; h: number },
+// ): HandDetection | null {
+//   try {
+//     if (!outputs || outputs.length === 0) return null;
+
+//     let rawLandmarks: Float32Array | null = null;
+//     let handFlag = 1.0;
+//     let handedness: 'Left' | 'Right' = 'Right';
+
+//     // Identify output tensors by shape and value characteristics
+//     for (const buf of outputs) {
+//       const f = new Float32Array(buf);
+//       if (f.length === 63) {
+//         let maxVal = 0;
+//         for (let i = 0; i < 63; i++) {
+//           const v = Math.abs(f[i]);
+//           if (v > maxVal) maxVal = v;
+//         }
+//         // Pixel coordinates (0..224), unlike world landmarks which are in [-0.1..0.1]
+//         if (maxVal > 1.0) {
+//           rawLandmarks = f;
+//         }
+//       }
+//     }
+
+//     if (!rawLandmarks && outputs[0]) {
+//       rawLandmarks = new Float32Array(outputs[0]);
+//     }
+//     if (!rawLandmarks || rawLandmarks.length < 63) return null;
+
+//     if (outputs.length > 1) {
+//       const f1 = new Float32Array(outputs[1]);
+//       if (f1.length === 1) handFlag = f1[0];
+//     }
+
+//     if (handFlag < LANDMARK_FLAG_THRESHOLD) {
+//       return null;
+//     }
+
+//     if (outputs.length > 2) {
+//       const f2 = new Float32Array(outputs[2]);
+//       if (f2.length === 1) handedness = f2[0] > 0.5 ? 'Right' : 'Left';
+//     }
+
+//     const landmarks: Landmark[] = [];
+//     for (let i = 0; i < 21; i++) {
+//       const lx = rawLandmarks[i * 3 + 0] / LANDMARK_INPUT;
+//       const ly = rawLandmarks[i * 3 + 1] / LANDMARK_INPUT;
+//       const lz = rawLandmarks[i * 3 + 2] / LANDMARK_INPUT;
+
+//       landmarks.push({
+//         x: crop.x + lx * crop.w,
+//         y: crop.y + ly * crop.h,
+//         z: lz,
+//       });
+//     }
+
+//     return {
+//       landmarks,
+//       handedness,
+//       confidence: handFlag,
+//     };
+//   } catch (e) {
+//     console.error('[handDetector] decode landmarks error:', e);
+//     return null;
+//   }
+// }
+
+// /**
+//  * Convert image to Float32Array with values in [0, 1].
+//  * MediaPipe detector & landmark models expect [0..1] normalized RGB float32.
+//  */
+// async function imageToFloat32Normalized(
+//   uri: string,
+//   width: number,
+//   height: number,
+// ): Promise<Float32Array> {
+//   const resized = await ImageManipulator.manipulateAsync(
+//     uri,
+//     [{ resize: { width, height } }],
+//     {
+//       base64: true,
+//       compress: 0.9,
+//       format: ImageManipulator.SaveFormat.JPEG,
+//     },
+//   );
+
+//   if (!resized.base64) throw new Error('resize failed');
+
+//   const binary = atob(resized.base64);
+//   const len = binary.length;
+//   const bytes = new Uint8Array(len);
+//   for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+
+//   const decoded = jpeg.decode(bytes, { useTArray: true, formatAsRGBA: true });
+
+//   const out = new Float32Array(width * height * 3);
+//   for (let i = 0, j = 0; i < width * height * 4; i += 4, j += 3) {
+//     out[j]     = decoded.data[i]     / 255.0;
+//     out[j + 1] = decoded.data[i + 1] / 255.0;
+//     out[j + 2] = decoded.data[i + 2] / 255.0;
+//   }
+//   return out;
+// }
+
+// async function cropImage(
+//   uri: string,
+//   x: number,
+//   y: number,
+//   w: number,
+//   h: number,
+//   imgWidth?: number,
+//   imgHeight?: number,
+// ): Promise<string> {
+//   let imgW = imgWidth;
+//   let imgH = imgHeight;
+//   if (!imgW || !imgH) {
+//     const info = await ImageManipulator.manipulateAsync(uri, [], {});
+//     imgW = info.width;
+//     imgH = info.height;
+//   }
+
+//   let originX = Math.round(x * imgW);
+//   let originY = Math.round(y * imgH);
+//   let cropW = Math.round(w * imgW);
+//   let cropH = Math.round(h * imgH);
+
+//   originX = Math.max(0, Math.min(imgW - 10, originX));
+//   originY = Math.max(0, Math.min(imgH - 10, originY));
+//   cropW = Math.max(10, Math.min(imgW - originX, cropW));
+//   cropH = Math.max(10, Math.min(imgH - originY, cropH));
+
+//   const result = await ImageManipulator.manipulateAsync(
+//     uri,
+//     [{ crop: { originX, originY, width: cropW, height: cropH } }],
+//     { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+//   );
+//   return result.uri;
+// }
+
+
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as jpeg from 'jpeg-js';
 import { getHandDetector, getLandmarksDetector } from './tfliteModels';

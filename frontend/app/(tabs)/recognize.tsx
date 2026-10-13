@@ -7,10 +7,12 @@ import {
   ActivityIndicator,
   ScrollView,
   Animated,
+  AppState,
   LayoutChangeEvent,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { Screen } from '@/components/Screen';
@@ -21,16 +23,26 @@ import { saveHistoryEntry } from '@/services/storage';
 import HandLandmarkOverlay from '@/components/HandLandmarkOverlay';
 import type { Landmark } from '@/services/landmarks';
 
-const LOOP_DELAY_MS = 1;
+// Delay between recognition attempts (capture + inference add their own time).
+const LOOP_DELAY_MS = 10;
 
-// Stability filter (same idea as the Python script)
-const STABLE_FRAMES = 7; // same label this many frames in a row
-const MIN_CONF = 0.4; // minimum confidence to count a frame
-const MAX_MISSED_FRAMES = 2; // tolerate brief detection drop-outs
+// Camera recovery
+const CAPTURE_BACKOFF_BASE_MS = 150; // grows 2x per consecutive failure
+const CAPTURE_BACKOFF_MAX_MS = 1500;
+const MAX_CAPTURE_FAILS = 5; // then remount the camera view
+const CAMERA_SETTLE_MS = 600; // wait after the camera reports ready
 
-// Set to true if signs come out mirrored vs. your Python training pipeline
-// (test with an asymmetric sign / two-hand sign order).
+// Stability filter
+const STABLE_FRAMES = 7;
+const MIN_CONF = 0.4;
+const MAX_MISSED_FRAMES = 2;
+
+// Set to true if your model expects mirrored hand features.
 const MIRROR_X = false;
+
+const OVERLAY_BG = 'rgba(0,0,0,0.5)';
+const GOOD = '#34D399';
+const BAD = '#F87171';
 
 interface SimpleResult {
   sign: string;
@@ -45,28 +57,48 @@ interface StableState {
   missed: number;
 }
 
-const freshStable = (): StableState => ({ sign: '', count: 0, locked: false, missed: 0 });
+const freshStable = (): StableState => ({
+  sign: '',
+  count: 0,
+  locked: false,
+  missed: 0,
+});
 
 export default function Recognize() {
   const { colors } = useTheme();
   const { language } = useLanguage();
+
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
   const [active, setActive] = useState(false);
-  const busyRef = useRef(false);
-  const stableRef = useRef<StableState>(freshStable());
-  const [lastResult, setLastResult] = useState<SimpleResult | null>(null);
-  const [word, setWord] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('Idle');
-  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [handsLandmarks, setHandsLandmarks] = useState<Landmark[][]>([]);
-  const [cameraDims, setCameraDims] = useState({ width: 0, height: 0 });
-
   const [ready, setReady] = useState(false);
 
-  // Animated dot to show processing without a flicker overlay
+  // Camera lifecycle
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraKey, setCameraKey] = useState(0);
+  const [cameraIssue, setCameraIssue] = useState(false);
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  const captureFailsRef = useRef(0);
+
+  // Current-frame prediction (null when no hand / unclear sign)
+  const [liveResult, setLiveResult] = useState<SimpleResult | null>(null);
+  const [holdCount, setHoldCount] = useState(0);
+  const [word, setWord] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loadingText, setLoadingText] = useState('Loading models…');
+
+  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
+
+  const [handsLandmarks, setHandsLandmarks] = useState<Landmark[][]>([]);
+  const [cameraDims, setCameraDims] = useState({ width: 0, height: 0 });
+  const [detectedHandsCount, setDetectedHandsCount] = useState(0);
+
+  const busyRef = useRef(false);
+  const stableRef = useRef<StableState>(freshStable());
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Processing dot
   const dotOpacity = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -86,65 +118,113 @@ export default function Recognize() {
     Animated.timing(dotOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
   }, [dotOpacity]);
 
-  // Lazy-load native modules
+  // Pause when backgrounded; remount camera when returning (Android kills the session)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      const isActive = state === 'active';
+      setAppActive(isActive);
+      if (isActive) {
+        setCameraReady(false);
+        setCameraKey((k) => k + 1);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Load models
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       try {
-        setStatus('Loading models…');
+        setLoadingText('Loading models…');
+        setError(null);
+
         const { getHandDetector, getLandmarksDetector, getClassifier } =
           await import('@/services/tfliteModels');
+
         await getHandDetector();
         await getLandmarksDetector();
         await getClassifier();
+
         if (!cancelled) {
           setReady(true);
-          setStatus('Ready — tap Start to begin');
+          setLoadingText('');
         }
       } catch (e: any) {
         console.error('[recognize] model load failed', e);
         if (!cancelled) {
           setError('Model load failed: ' + (e?.message ?? 'unknown error'));
-          setStatus('Error');
         }
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Inference loop (setTimeout chain avoids interval drift + overlapping runs)
+  // Recognition loop
   useEffect(() => {
-    if (!active || !permission?.granted || !ready) return;
+    if (!active || !permission?.granted || !ready || !cameraReady || !appActive) return;
 
     let cancelled = false;
     stableRef.current = freshStable();
+    captureFailsRef.current = 0;
 
-    // Called when there is no usable frame result (no hand / unclear sign).
     const registerMiss = () => {
-      const s = stableRef.current;
-      s.missed += 1;
-      if (s.missed > MAX_MISSED_FRAMES) {
-        stableRef.current = freshStable(); // hand really left: allow same letter again
+      const current = stableRef.current;
+      current.missed += 1;
+      if (current.missed > MAX_MISSED_FRAMES) {
+        stableRef.current = freshStable();
+        setHoldCount(0);
       }
     };
 
     const runLoop = async () => {
       if (cancelled) return;
 
+      let nextDelay = LOOP_DELAY_MS;
+
       if (!busyRef.current && cameraRef.current) {
         busyRef.current = true;
         startPulse();
+
         try {
-          const photo = (await cameraRef.current.takePictureAsync({
-            base64: false,
-            quality: 0.8,
-            skipProcessing: true,
-          } as any)) as any;
+          // ---- Capture (transient failures are expected on Android) ----
+          let photo: any = null;
+          try {
+            photo = await cameraRef.current.takePictureAsync({
+              base64: false,
+              quality: 0.8,
+              skipProcessing: true,
+            } as any);
+            captureFailsRef.current = 0;
+            setCameraIssue(false);
+          } catch (captureErr: any) {
+            captureFailsRef.current += 1;
+            console.warn(
+              `[recognize] capture failed (${captureFailsRef.current}/${MAX_CAPTURE_FAILS}):`,
+              captureErr?.message,
+            );
+            setCameraIssue(true);
+            nextDelay = Math.min(
+              CAPTURE_BACKOFF_MAX_MS,
+              CAPTURE_BACKOFF_BASE_MS * 2 ** captureFailsRef.current,
+            );
+
+            if (captureFailsRef.current >= MAX_CAPTURE_FAILS) {
+              // Camera session is stuck: remount it. Effect restarts when ready.
+              captureFailsRef.current = 0;
+              setCameraReady(false);
+              setCameraKey((k) => k + 1);
+            }
+          }
+
+          if (cancelled) return;
 
           if (!photo?.uri) {
-            setStatus('Capture failed');
+            registerMiss();
           } else {
             const { detectHandsWithSize } = await import('@/services/handDetector');
             const { extract130Features } = await import('@/services/landmarks');
@@ -153,46 +233,55 @@ export default function Recognize() {
             const { hands, frameWidth, frameHeight } = await detectHandsWithSize(photo.uri);
             if (cancelled) return;
 
+            setDetectedHandsCount(hands.length);
+
             if (hands.length === 0) {
-              setStatus('No hand detected');
               setHandsLandmarks([]);
+              setLiveResult(null);
               registerMiss();
             } else {
-              setHandsLandmarks(hands.map((h) => h.landmarks));
+              setHandsLandmarks(hands.map((hand) => hand.landmarks));
 
-              // Optional mirror fix for features only (overlay stays as captured)
-              const featHands = MIRROR_X
-                ? hands.map((h) => ({
-                  ...h,
-                  landmarks: h.landmarks.map((l) => ({ ...l, x: 1 - l.x })),
+              // Mirror correction for model features only (overlay unchanged)
+              const featureHands = MIRROR_X
+                ? hands.map((hand) => ({
+                  ...hand,
+                  landmarks: hand.landmarks.map((l) => ({ ...l, x: 1 - l.x })),
                 }))
                 : hands;
 
-              const features = extract130Features(featHands, frameWidth, frameHeight);
+              const features = extract130Features(featureHands, frameWidth, frameHeight);
               const prediction = await classify(features);
 
+              if (cancelled) return;
+
               if (!prediction || prediction.confidence < MIN_CONF) {
-                setStatus(`${hands.length} hand(s) · Sign unclear`);
+                setLiveResult(null);
                 registerMiss();
               } else {
-                const s = stableRef.current;
-                if (s.sign === prediction.sign) {
-                  s.count += 1;
-                  s.missed = 0;
+                const current = stableRef.current;
+
+                if (current.sign === prediction.sign) {
+                  current.count += 1;
+                  current.missed = 0;
                 } else {
-                  stableRef.current = { sign: prediction.sign, count: 1, locked: false, missed: 0 };
+                  stableRef.current = {
+                    sign: prediction.sign,
+                    count: 1,
+                    locked: false,
+                    missed: 0,
+                  };
                 }
 
-                const cur = stableRef.current;
-                setLastResult(prediction);
-                setStatus(
-                  `${prediction.sign} · ${(prediction.confidence * 100).toFixed(0)}% · ` +
-                  `${Math.min(cur.count, STABLE_FRAMES)}/${STABLE_FRAMES}${cur.locked ? ' ✓' : ''}`,
-                );
+                const stable = stableRef.current;
+                setLiveResult(prediction);
+                setHoldCount(Math.min(stable.count, STABLE_FRAMES));
 
-                if (cur.count >= STABLE_FRAMES && !cur.locked) {
-                  cur.locked = true; // add once per hold
+                // Add the sign once per hold
+                if (stable.count >= STABLE_FRAMES && !stable.locked) {
+                  stable.locked = true;
                   setWord((w) => (w + prediction.sign).slice(-40));
+
                   await saveHistoryEntry({
                     id: `${Date.now()}-${prediction.sign}`,
                     sign: prediction.sign,
@@ -204,8 +293,7 @@ export default function Recognize() {
             }
           }
         } catch (e: any) {
-          console.error('[recognize] predict failed', e);
-          setStatus('Error: ' + (e?.message ?? 'unknown'));
+          console.error('[recognize] pipeline failed', e);
         } finally {
           busyRef.current = false;
           stopPulse();
@@ -213,11 +301,12 @@ export default function Recognize() {
       }
 
       if (!cancelled) {
-        intervalRef.current = setTimeout(runLoop, LOOP_DELAY_MS);
+        intervalRef.current = setTimeout(runLoop, nextDelay);
       }
     };
 
-    intervalRef.current = setTimeout(runLoop, 300);
+    // Give the camera a moment to settle after it reports ready
+    intervalRef.current = setTimeout(runLoop, CAMERA_SETTLE_MS);
 
     return () => {
       cancelled = true;
@@ -229,7 +318,26 @@ export default function Recognize() {
       stableRef.current = freshStable();
       stopPulse();
     };
-  }, [active, permission?.granted, ready, startPulse, stopPulse]);
+  }, [active, permission?.granted, ready, cameraReady, appActive, startPulse, stopPulse]);
+
+  // Reset live info whenever recognition stops
+  useEffect(() => {
+    if (!active) {
+      setHandsLandmarks([]);
+      setDetectedHandsCount(0);
+      setLiveResult(null);
+      setHoldCount(0);
+      setCameraIssue(false);
+    }
+  }, [active]);
+
+  const switchCamera = () => {
+    setActive(false);
+    stableRef.current = freshStable();
+    captureFailsRef.current = 0;
+    setCameraReady(false);
+    setCameraFacing((c) => (c === 'front' ? 'back' : 'front'));
+  };
 
   if (!permission) {
     return (
@@ -273,6 +381,24 @@ export default function Recognize() {
     );
   }
 
+  const handsDetected = active && detectedHandsCount > 0;
+
+  const badgeText = error
+    ? 'Error'
+    : loadingText
+      ? loadingText
+      : !cameraReady
+        ? 'Starting camera…'
+        : !active
+          ? 'Tap Start'
+          : cameraIssue
+            ? 'Camera busy… retrying'
+            : handsDetected
+              ? `${detectedHandsCount} hand${detectedHandsCount > 1 ? 's' : ''} detected`
+              : 'No hand detected';
+
+  const badgeColor = !active || cameraIssue || !cameraReady ? '#FBBF24' : handsDetected ? GOOD : BAD;
+
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -284,6 +410,7 @@ export default function Recognize() {
           Offline · On-device · {language.name}
         </Text>
 
+        {/* Camera + overlays */}
         <View
           style={[
             styles.cameraWrap,
@@ -292,113 +419,144 @@ export default function Recognize() {
               backgroundColor: colors.backgroundSecondary,
             },
           ]}
-          onLayout={(e: LayoutChangeEvent) => {
-            const { width, height } = e.nativeEvent.layout;
+          onLayout={(event: LayoutChangeEvent) => {
+            const { width, height } = event.nativeEvent.layout;
             setCameraDims({ width, height });
           }}
         >
           <CameraView
+            key={`${cameraFacing}-${cameraKey}`}
             ref={cameraRef}
             style={styles.camera}
-            facing="front"
+            facing={cameraFacing}
             mute
             animateShutter={false}
             flash="off"
+            onCameraReady={() => setCameraReady(true)}
+            onMountError={(e: any) => {
+              console.warn('[recognize] camera mount error', e?.message);
+              setCameraReady(false);
+            }}
           />
 
           {cameraDims.width > 0 &&
-            handsLandmarks.map((lms, i) => (
+            handsLandmarks.map((landmarks, index) => (
               <HandLandmarkOverlay
-                key={i}
-                landmarks={lms}
+                key={index}
+                landmarks={landmarks}
                 width={cameraDims.width}
                 height={cameraDims.height}
               />
             ))}
 
-          <Animated.View style={[styles.recordingDot, { opacity: dotOpacity }]}>
-            <View style={[styles.dot, { backgroundColor: colors.primary }]} />
-          </Animated.View>
+          {/* Top-left translucent badge */}
+          <View style={styles.badge} pointerEvents="none">
+            <View style={styles.badgeRow}>
+              <Animated.View
+                style={[
+                  styles.dot,
+                  { backgroundColor: colors.primary, opacity: dotOpacity },
+                ]}
+              />
+              <Ionicons name="hand-left-outline" size={14} color={badgeColor} />
+              <Text style={[styles.badgeText, { color: badgeColor }]}>{badgeText}</Text>
+            </View>
+
+            {active && cameraReady && (
+              <View style={styles.badgeRow}>
+                {liveResult ? (
+                  <>
+                    <Text style={styles.badgeLetter}>{liveResult.sign}</Text>
+                    <Text style={styles.badgeScore}>
+                      {(liveResult.confidence * 100).toFixed(0)}%
+                    </Text>
+                    <Text style={styles.badgeHold}>
+                      {holdCount}/{STABLE_FRAMES}
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.badgeMuted}>Letter —</Text>
+                )}
+              </View>
+            )}
+          </View>
         </View>
 
-        <View style={{ marginTop: spacing.lg }}>
-          <Button
-            label={active ? 'Stop' : 'Start'}
-            onPress={() => setActive((a) => !a)}
-            disabled={!ready}
-          />
-        </View>
+        {/* Start / Stop + switch camera */}
+        <View style={styles.controlsRow}>
+          <View style={{ flex: 1 }}>
+            <Button
+              label={active ? 'Stop' : 'Start'}
+              onPress={() => setActive((a) => !a)}
+              disabled={!ready || !cameraReady}
+            />
+          </View>
 
-        <View
-          style={[
-            styles.statusBox,
-            { borderColor: colors.border, backgroundColor: colors.surface },
-          ]}
-        >
-          <Text style={[typography.caption, { color: colors.textSecondary }]}>Status</Text>
-          <Text
-            style={[typography.body, { color: colors.textPrimary, marginTop: 4 }]}
-            numberOfLines={2}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Switch camera"
+            onPress={switchCamera}
+            style={[
+              styles.iconButton,
+              { borderColor: colors.border, backgroundColor: colors.surface },
+            ]}
           >
-            {error ? error : status}
-          </Text>
+            <Ionicons name="camera-reverse-outline" size={24} color={colors.primary} />
+          </Pressable>
         </View>
 
-        <View
-          style={[
-            styles.resultBox,
-            { borderColor: colors.border, backgroundColor: colors.surface },
-          ]}
-        >
-          <Text style={[typography.caption, { color: colors.textSecondary }]}>
-            Latest prediction
-          </Text>
-          {lastResult ? (
-            <>
-              <Text style={[typography.display, { color: colors.textPrimary, marginTop: 4 }]}>
-                {lastResult.sign}
-              </Text>
-              <Text style={[typography.caption, { color: colors.textSecondary }]}>
-                Confidence {(lastResult.confidence * 100).toFixed(0)}%
-              </Text>
-              {lastResult.alternatives.length > 0 && (
-                <Text
-                  style={[typography.small, { color: colors.textMuted, marginTop: spacing.xs }]}
-                >
-                  Also:{' '}
-                  {lastResult.alternatives
-                    .map((a) => `${a.sign} ${(a.confidence * 100).toFixed(0)}%`)
-                    .join(' · ')}
-                </Text>
-              )}
-            </>
-          ) : (
-            <Text style={[typography.body, { color: colors.textMuted, marginTop: 4 }]}>—</Text>
-          )}
-        </View>
-
+        {/* Word being formed */}
         <View
           style={[
             styles.wordBox,
             { borderColor: colors.border, backgroundColor: colors.surface },
           ]}
         >
-          <View
-            style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <Text style={[typography.caption, { color: colors.textSecondary }]}>Built word</Text>
-            <Pressable onPress={() => setWord('')} hitSlop={12}>
-              <Ionicons name="trash-outline" size={20} color={colors.textMuted} />
-            </Pressable>
+          <View style={styles.wordHeader}>
+            <Text style={[typography.caption, { color: colors.textSecondary }]}>
+              Built word
+            </Text>
+
+            <View style={styles.wordActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add space"
+                onPress={() => setWord((w) => (w + ' ').slice(-40))}
+                hitSlop={10}
+                style={[styles.smallBtn, { borderColor: colors.border }]}
+              >
+                <Ionicons name="return-down-back-outline" size={18} color={colors.textMuted} />
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Delete last letter"
+                onPress={() => setWord((w) => w.slice(0, -1))}
+                hitSlop={10}
+                style={[styles.smallBtn, { borderColor: colors.border }]}
+              >
+                <Ionicons name="backspace-outline" size={18} color={colors.textMuted} />
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Clear built word"
+                onPress={() => setWord('')}
+                hitSlop={10}
+                style={[styles.smallBtn, { borderColor: colors.border }]}
+              >
+                <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
           </View>
+
           <Text
             style={[
               typography.h1,
-              { color: word.length > 0 ? colors.textPrimary : colors.textMuted, marginTop: 4 },
+              {
+                color: word.length > 0 ? colors.textPrimary : colors.textMuted,
+                marginTop: spacing.sm,
+              },
             ]}
           >
             {word.length > 0 ? word : '—'}
@@ -410,7 +568,13 @@ export default function Recognize() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+
   cameraWrap: {
     marginTop: spacing.lg,
     aspectRatio: 3 / 4,
@@ -419,27 +583,67 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   camera: { flex: 1 },
-  recordingDot: { position: 'absolute', top: 12, right: 12 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  statusBox: {
+
+  badge: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    backgroundColor: OVERLAY_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 4,
+    maxWidth: '75%',
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  badgeText: { fontSize: 12, fontWeight: '600' },
+  badgeLetter: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  badgeScore: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  badgeHold: { color: 'rgba(255,255,255,0.65)', fontSize: 11 },
+  badgeMuted: { color: 'rgba(255,255,255,0.65)', fontSize: 12 },
+
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: spacing.sm,
     marginTop: spacing.lg,
-    padding: spacing.md,
+  },
+  iconButton: {
+    minWidth: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1,
-    minHeight: 64,
   },
-  resultBox: {
-    marginTop: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    minHeight: 110,
-  },
+
   wordBox: {
     marginTop: spacing.md,
     padding: spacing.lg,
     borderRadius: radius.lg,
     borderWidth: 1,
-    minHeight: 80,
+    minHeight: 90,
+  },
+  wordHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  wordActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  smallBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
