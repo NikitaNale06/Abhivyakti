@@ -17,7 +17,10 @@
     },
     "android": {
       "package": "com.abhivyakti.app",
-      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"],
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#F45B16",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -29,30 +32,31 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-"plugins": [
-  "expo-router",
-  "expo-font",
-  [
-    "expo-image-picker",
-    {
-      "photosPermission": "Allow Abhivyakti to access photos to recognize signs."
-    }
-  ],
-  [
-    "expo-camera",
-    {
-      "cameraPermission": "Allow Abhivyakti to use the camera to recognize signs."
-    }
-  ],
-  [
-    "expo-build-properties",
-    {
-      "android": {
-        "minSdkVersion": 26
-      }
-    }
-  ],
-  "react-native-fast-tflite"
-]
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Abhivyakti to access photos to recognize signs."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Abhivyakti to use the camera to recognize signs."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "react-native-fast-tflite",
+      "expo-asset"
+    ]
   }
 }

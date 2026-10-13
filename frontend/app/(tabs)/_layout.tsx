@@ -20,10 +20,9 @@ function RootStack() {
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="result" options={{ title: 'Result' }} />
-        <Stack.Screen name="lesson/[id]" options={{ title: 'Lesson' }} />
-        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="recognize" options={{ headerShown: false }} />
+        <Stack.Screen name="learn" options={{ headerShown: false }} />
+        <Stack.Screen name="history" options={{ headerShown: false }} />
       </Stack>
     </>
   );

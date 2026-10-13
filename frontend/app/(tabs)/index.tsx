@@ -70,24 +70,26 @@ export default function Home() {
         >
           Continue learning
         </Text>
-        <Card>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={[styles.lessonBadge, { backgroundColor: colors.primarySoft }]}>
-              <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 20 }}>A</Text>
+        <Pressable onPress={() => router.push('/lesson/A')} accessibilityLabel="Continue learning sign A">
+          <Card>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={[styles.lessonBadge, { backgroundColor: colors.primarySoft }]}>
+                <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 20 }}>A</Text>
+              </View>
+              <View style={{ flex: 1, marginLeft: spacing.md }}>
+                <Text style={[typography.bodyStrong, { color: colors.textPrimary }]}>
+                  Alphabets — 3D Sign Studio
+                </Text>
+                <Text
+                  style={[typography.caption, { color: colors.textSecondary, marginTop: 2 }]}
+                >
+                  Letter to 3D Avatar • AI Verified
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </View>
-            <View style={{ flex: 1, marginLeft: spacing.md }}>
-              <Text style={[typography.bodyStrong, { color: colors.textPrimary }]}>
-                Alphabets — Set 1
-              </Text>
-              <Text
-                style={[typography.caption, { color: colors.textSecondary, marginTop: 2 }]}
-              >
-                12 of 26 signs practiced
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </View>
-        </Card>
+          </Card>
+        </Pressable>
       </ScrollView>
     </Screen>
   );
