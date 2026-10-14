@@ -24,13 +24,13 @@ import HandLandmarkOverlay from '@/components/HandLandmarkOverlay';
 import type { Landmark } from '@/services/landmarks';
 
 // Delay between recognition attempts (capture + inference add their own time).
-const LOOP_DELAY_MS = 10;
+const LOOP_DELAY_MS = 1;   // tight chain — inference itself is the bottleneck
 
 // Camera recovery
-const CAPTURE_BACKOFF_BASE_MS = 150; // grows 2x per consecutive failure
-const CAPTURE_BACKOFF_MAX_MS = 1500;
-const MAX_CAPTURE_FAILS = 5; // then remount the camera view
-const CAMERA_SETTLE_MS = 600; // wait after the camera reports ready
+const CAPTURE_BACKOFF_BASE_MS = 100; // grows 2x per consecutive failure
+const CAPTURE_BACKOFF_MAX_MS = 800;
+const MAX_CAPTURE_FAILS = 3; // remount faster
+const CAMERA_SETTLE_MS = 300; // reduced from 600 — camera is ready sooner
 
 // Stability filter
 const STABLE_FRAMES = 7;
@@ -196,8 +196,9 @@ export default function Recognize() {
           try {
             photo = await cameraRef.current.takePictureAsync({
               base64: false,
-              quality: 0.8,
+              quality: 0.35, // lower = faster JPEG encode, still enough for landmarks
               skipProcessing: true,
+              exif: false,   // skip EXIF writing
             } as any);
             captureFailsRef.current = 0;
             setCameraIssue(false);
