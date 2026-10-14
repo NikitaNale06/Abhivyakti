@@ -23,18 +23,18 @@ import { saveHistoryEntry } from '@/services/storage';
 import HandLandmarkOverlay from '@/components/HandLandmarkOverlay';
 import type { Landmark } from '@/services/landmarks';
 
-// Delay between recognition attempts (capture + inference add their own time).
-const LOOP_DELAY_MS = 1;   // tight chain — inference itself is the bottleneck
+// Delay between recognition attempts (0ms for instantaneous continuous loop)
+const LOOP_DELAY_MS = 0;
 
 // Camera recovery
-const CAPTURE_BACKOFF_BASE_MS = 100; // grows 2x per consecutive failure
-const CAPTURE_BACKOFF_MAX_MS = 800;
+const CAPTURE_BACKOFF_BASE_MS = 30; // minimal backoff only on failure
+const CAPTURE_BACKOFF_MAX_MS = 200;
 const MAX_CAPTURE_FAILS = 3; // remount faster
-const CAMERA_SETTLE_MS = 300; // reduced from 600 — camera is ready sooner
+const CAMERA_SETTLE_MS = 0; // immediate start with 0 delay
 
 // Stability filter
-const STABLE_FRAMES = 7;
-const MIN_CONF = 0.4;
+const STABLE_FRAMES = 2; // quick 2-frame lock for instant real-time response
+const MIN_CONF = 0.35;
 const MAX_MISSED_FRAMES = 2;
 
 // Set to true if your model expects mirrored hand features.
@@ -97,6 +97,11 @@ export default function Recognize() {
   const busyRef = useRef(false);
   const stableRef = useRef<StableState>(freshStable());
   const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detectorModulesRef = useRef<{
+    detectHandsWithSize: (uri: string) => Promise<{ hands: any[]; frameWidth: number; frameHeight: number }>;
+    extract130Features: (hands: any[], w?: number, h?: number) => number[];
+    classify: (features: number[]) => Promise<any>;
+  } | null>(null);
 
   // Processing dot
   const dotOpacity = useRef(new Animated.Value(0)).current;
@@ -147,7 +152,18 @@ export default function Recognize() {
         await getLandmarksDetector();
         await getClassifier();
 
+        const [handModule, landmarksModule, classifierModule] = await Promise.all([
+          import('@/services/handDetector'),
+          import('@/services/landmarks'),
+          import('@/services/classifier'),
+        ]);
+
         if (!cancelled) {
+          detectorModulesRef.current = {
+            detectHandsWithSize: handModule.detectHandsWithSize,
+            extract130Features: landmarksModule.extract130Features,
+            classify: classifierModule.classify,
+          };
           setReady(true);
           setLoadingText('');
         }
@@ -196,9 +212,10 @@ export default function Recognize() {
           try {
             photo = await cameraRef.current.takePictureAsync({
               base64: false,
-              quality: 0.35, // lower = faster JPEG encode, still enough for landmarks
+              quality: 0.2, // minimal compression time for zero latency
               skipProcessing: true,
               exif: false,   // skip EXIF writing
+              shutterSound: false,
             } as any);
             captureFailsRef.current = 0;
             setCameraIssue(false);
@@ -227,9 +244,13 @@ export default function Recognize() {
           if (!photo?.uri) {
             registerMiss();
           } else {
-            const { detectHandsWithSize } = await import('@/services/handDetector');
-            const { extract130Features } = await import('@/services/landmarks');
-            const { classify } = await import('@/services/classifier');
+            const modules = detectorModulesRef.current;
+            const detectHandsWithSize =
+              modules?.detectHandsWithSize ?? (await import('@/services/handDetector')).detectHandsWithSize;
+            const extract130Features =
+              modules?.extract130Features ?? (await import('@/services/landmarks')).extract130Features;
+            const classify =
+              modules?.classify ?? (await import('@/services/classifier')).classify;
 
             const { hands, frameWidth, frameHeight } = await detectHandsWithSize(photo.uri);
             if (cancelled) return;
@@ -247,7 +268,7 @@ export default function Recognize() {
               const featureHands = MIRROR_X
                 ? hands.map((hand) => ({
                   ...hand,
-                  landmarks: hand.landmarks.map((l) => ({ ...l, x: 1 - l.x })),
+                  landmarks: hand.landmarks.map((l: Landmark) => ({ ...l, x: 1 - l.x })),
                 }))
                 : hands;
 
@@ -333,11 +354,17 @@ export default function Recognize() {
   }, [active]);
 
   const switchCamera = () => {
-    setActive(false);
+    busyRef.current = false;
     stableRef.current = freshStable();
     captureFailsRef.current = 0;
-    setCameraReady(false);
+    setHandsLandmarks([]);
+    setDetectedHandsCount(0);
+    setLiveResult(null);
     setCameraFacing((c) => (c === 'front' ? 'back' : 'front'));
+    // Keep UI responsive — ensure camera is marked ready after lens switch
+    setTimeout(() => {
+      setCameraReady(true);
+    }, 250);
   };
 
   if (!permission) {
@@ -426,7 +453,7 @@ export default function Recognize() {
           }}
         >
           <CameraView
-            key={`${cameraFacing}-${cameraKey}`}
+            key={cameraKey}
             ref={cameraRef}
             style={styles.camera}
             facing={cameraFacing}
@@ -437,6 +464,10 @@ export default function Recognize() {
             onMountError={(e: any) => {
               console.warn('[recognize] camera mount error', e?.message);
               setCameraReady(false);
+              setTimeout(() => {
+                setCameraKey((k) => k + 1);
+                setCameraReady(true);
+              }, 400);
             }}
           />
 
@@ -447,6 +478,7 @@ export default function Recognize() {
                 landmarks={landmarks}
                 width={cameraDims.width}
                 height={cameraDims.height}
+                isFrontCamera={cameraFacing === 'front'}
               />
             ))}
 

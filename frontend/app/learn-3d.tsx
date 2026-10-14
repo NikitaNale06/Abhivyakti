@@ -26,19 +26,23 @@ export default function Learn3D() {
   const router = useRouter();
   const params = useLocalSearchParams<{ initial?: string }>();
 
-  const initialParam = params.initial ? params.initial.toString().toUpperCase() : 'A';
-  const isNumberParam = /^[0-9]$/.test(initialParam);
+  const initialParam = params.initial ? params.initial.toString().toUpperCase() : '1';
+  const isNumberParam = /^[1-9]$/.test(initialParam);
 
-  const [activeTab, setActiveTab] = useState<'alphabet' | 'number'>(
-    isNumberParam ? 'number' : 'alphabet'
-  );
-  const [selectedId, setSelectedId] = useState<string>(initialParam);
+  const [activeTab, setActiveTab] = useState<'alphabet' | 'number'>('number');
+  const [selectedId, setSelectedId] = useState<string>(isNumberParam ? initialParam : '1');
   const [bonesCount, setBonesCount] = useState<number | null>(null);
   const [showRefTable, setShowRefTable] = useState(false);
   const viewerRef = useRef<RealisticHandViewerRef>(null);
 
-  const activeDataset: ISLSignDefinition[] =
-    activeTab === 'alphabet' ? ISL_ALPHABET_DATA : ISL_NUMBERS_DATA;
+  // If a letter A-Z was passed into learn-3d, redirect to authentic image lesson per requirement
+  React.useEffect(() => {
+    if (params.initial && /^[A-Z]$/.test(params.initial.toString().toUpperCase())) {
+      router.replace(`/lesson/${params.initial.toString().toUpperCase()}`);
+    }
+  }, [params.initial, router]);
+
+  const activeDataset: ISLSignDefinition[] = ISL_NUMBERS_DATA;
 
   const currentSign: ISLSignDefinition =
     getISLSignById(selectedId) || activeDataset[0];
@@ -49,11 +53,13 @@ export default function Learn3D() {
     currentIndex < activeDataset.length - 1 ? activeDataset[currentIndex + 1] : null;
 
   const handleSelectTab = (tab: 'alphabet' | 'number') => {
-    setActiveTab(tab);
-    if (tab === 'alphabet' && !/^[A-Z]$/.test(selectedId)) {
-      setSelectedId('A');
-    } else if (tab === 'number' && !/^[0-9]$/.test(selectedId)) {
-      setSelectedId('1');
+    if (tab === 'alphabet') {
+      router.push('/lesson/A');
+    } else {
+      setActiveTab('number');
+      if (!/^[1-9]$/.test(selectedId)) {
+        setSelectedId('1');
+      }
     }
   };
 
@@ -87,10 +93,10 @@ export default function Learn3D() {
 
         <View style={styles.headerTitleWrap}>
           <Text style={[typography.h3, { color: colors.textPrimary }]}>
-            ISL 3D Sign Studio
+            ISL 3D Numbers Studio
           </Text>
           <Text style={[typography.caption, { color: colors.textSecondary }]}>
-            {bonesCount ? `${bonesCount} Bones Rigged • 1 & 2 Hand ISL` : 'Interactive 3D Hand Model'}
+            {bonesCount ? `${bonesCount} Bones Rigged • Numbers 1–9 3D` : 'Interactive 3D Hand Model • Numbers 1–9'}
           </Text>
         </View>
 
@@ -110,29 +116,21 @@ export default function Learn3D() {
         {/* Category Segment Control */}
         <View style={[styles.tabSegmentWrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Pressable
-            style={[styles.tabSegmentBtn, activeTab === 'alphabet' && { backgroundColor: colors.primary }]}
-            onPress={() => handleSelectTab('alphabet')}
+            style={[styles.tabSegmentBtn, { backgroundColor: colors.primary }]}
+            onPress={() => handleSelectTab('number')}
           >
-            <Text
-              style={[
-                styles.tabSegmentText,
-                { color: activeTab === 'alphabet' ? '#FFFFFF' : colors.textSecondary },
-              ]}
-            >
-              Alphabets (A–Z)
+            <Ionicons name="cube" size={14} color="#FFFFFF" />
+            <Text style={[styles.tabSegmentText, { color: '#FFFFFF', marginLeft: 6 }]}>
+              Numbers 1–9 (3D Model)
             </Text>
           </Pressable>
           <Pressable
-            style={[styles.tabSegmentBtn, activeTab === 'number' && { backgroundColor: colors.primary }]}
-            onPress={() => handleSelectTab('number')}
+            style={styles.tabSegmentBtn}
+            onPress={() => handleSelectTab('alphabet')}
           >
-            <Text
-              style={[
-                styles.tabSegmentText,
-                { color: activeTab === 'number' ? '#FFFFFF' : colors.textSecondary },
-              ]}
-            >
-              Numbers (0–9)
+            <Ionicons name="image-outline" size={14} color={colors.textSecondary} />
+            <Text style={[styles.tabSegmentText, { color: colors.textSecondary, marginLeft: 6 }]}>
+              Alphabets A–Z (Images)
             </Text>
           </Pressable>
         </View>
