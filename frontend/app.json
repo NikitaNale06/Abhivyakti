@@ -18,8 +18,9 @@
     "android": {
       "package": "com.abhivyakti.app",
       "permissions": [
-        "CAMERA",
-        "READ_MEDIA_IMAGES"
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#F45B16",
@@ -57,6 +58,16 @@
       ],
       "react-native-fast-tflite",
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "d7da1be3-5aad-4868-a9f1-8106e4715b23"
+      }
+    }
   }
 }

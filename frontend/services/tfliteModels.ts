@@ -1,4 +1,5 @@
 import type { TensorflowModel } from 'react-native-fast-tflite';
+import { Asset } from 'expo-asset';
 
 let handDetector: TensorflowModel | null = null;
 let landmarksDetector: TensorflowModel | null = null;
@@ -17,13 +18,29 @@ function getLoadTensorflowModel() {
   }
 }
 
+/**
+ * Resolve a require()'d asset to a local file:// URI that works in
+ * both dev builds (Metro) and standalone/EAS preview APKs.
+ *
+ * In a standalone build, Image.resolveAssetSource() may return an
+ * HTTP URI pointing at a non-existent dev server. expo-asset's
+ * downloadAsync() resolves the embedded asset to a local file path.
+ */
+async function resolveModelSource(moduleId: number): Promise<{ url: string }> {
+  const [asset] = await Asset.loadAsync(moduleId);
+  if (!asset?.localUri) {
+    throw new Error(`Failed to resolve local URI for asset ${moduleId}`);
+  }
+  return { url: asset.localUri };
+}
+
 export async function getHandDetector(): Promise<TensorflowModel> {
   if (handDetector) return handDetector;
   const loadTensorflowModel = getLoadTensorflowModel();
-  const model = await loadTensorflowModel(
+  const source = await resolveModelSource(
     require('../assets/models/hand_detector.tflite'),
-    [],
   );
+  const model = await loadTensorflowModel(source, []);
   if (!model) throw new Error('Failed to load hand detector model');
   handDetector = model;
   return model;
@@ -32,10 +49,10 @@ export async function getHandDetector(): Promise<TensorflowModel> {
 export async function getLandmarksDetector(): Promise<TensorflowModel> {
   if (landmarksDetector) return landmarksDetector;
   const loadTensorflowModel = getLoadTensorflowModel();
-  const model = await loadTensorflowModel(
+  const source = await resolveModelSource(
     require('../assets/models/hand_landmarks_detector.tflite'),
-    [],
   );
+  const model = await loadTensorflowModel(source, []);
   if (!model) throw new Error('Failed to load hand landmarks detector model');
   landmarksDetector = model;
   return model;
@@ -44,10 +61,10 @@ export async function getLandmarksDetector(): Promise<TensorflowModel> {
 export async function getClassifier(): Promise<TensorflowModel> {
   if (classifier) return classifier;
   const loadTensorflowModel = getLoadTensorflowModel();
-  const model = await loadTensorflowModel(
+  const source = await resolveModelSource(
     require('../assets/models/isl_landmark_model.tflite'),
-    [],
   );
+  const model = await loadTensorflowModel(source, []);
   if (!model) throw new Error('Failed to load ISL classifier model');
   classifier = model;
   return model;
