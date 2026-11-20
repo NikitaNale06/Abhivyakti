@@ -17,9 +17,11 @@ function RootStack() {
           headerTintColor: colors.textPrimary,
           headerShadowVisible: false,
           contentStyle: { backgroundColor: colors.background },
+          animation: 'fade',
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="home" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="lesson/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="learn-3d" options={{ headerShown: false }} />

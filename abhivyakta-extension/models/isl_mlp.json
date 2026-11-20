@@ -1,0 +1,1 @@
+{"dims": [130, 256, 128, 64, 36], "dtype": "float32le", "layout": "per layer: W[in][out] row-major then b[out]; relu on hidden, softmax on last"}

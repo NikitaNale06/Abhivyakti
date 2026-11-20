@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><title>Abhivyakta</title>
+<link rel="stylesheet" href="popup.css">
+<header>
+  <div class="logo">अ</div>
+  <div><h1>Abhivyakta</h1><p>Offline · On-device · ISL</p></div>
+  <label class="switch" title="Turn translation on or off"><input type="checkbox" id="enabled"><span></span></label>
+</header>
+
+<section class="card">
+  <label class="field"><span>Appearance</span>
+    <select id="theme"><option value="system">System default</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+  <label class="field"><span>Which videos</span>
+    <select id="mode"><option value="all">All visible videos (up to 4, e.g. Meet)</option><option value="largest">Largest video only (faster)</option></select></label>
+</section>
+
+<section class="card">
+  <label class="field"><span>Minimum confidence <b id="minConfV"></b></span><input type="range" id="minConf" min="0.4" max="0.95" step="0.05"></label>
+  <label class="field"><span>Hold before a letter is accepted <b><em id="holdMsV"></em> ms</b></span><input type="range" id="holdMs" min="100" max="900" step="50"></label>
+  <label class="field"><span>Pause that adds a space <b><em id="spaceMsV"></em> ms</b></span><input type="range" id="spaceMs" min="600" max="4000" step="100"></label>
+</section>
+
+<section class="card">
+  <label class="field"><span>Frame size <small>(bigger helps small hands, slower)</small></span>
+    <select id="maxSide"><option>384</option><option>512</option><option>768</option><option>1024</option></select></label>
+  <label class="row"><span>Mirror frames <small>(try if letters come out wrong)</small></span><span class="switch"><input type="checkbox" id="mirror"><span></span></span></label>
+</section>
+
+<p class="hint">Alt+Shift+I turns Abhivyakta on or off. Drag the panel by its header, resize it from the corner, double-click the header to snap it back under the video.</p>
+<script src="popup.js"></script>
