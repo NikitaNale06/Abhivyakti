@@ -6,13 +6,27 @@
 import Constants from 'expo-constants';
 import { LearnerLevel, RoadmapResponseData, RoadmapModuleItem } from './learningStorage';
 
+let localKey = '';
+try {
+  // @ts-ignore — local gitignored runtime key
+  const { GEMINI_RUNTIME_KEY } = require('./geminiConfig');
+  localKey = GEMINI_RUNTIME_KEY || '';
+} catch (e) {
+  // ignored
+}
+
 const BASE_URL = 'https://abhivyakti-backend-486350221693.asia-south1.run.app';
 const GEMINI_API_KEY =
   process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
+  localKey ||
   (Constants?.expoConfig?.extra as any)?.geminiApiKey ||
   '';
 
 async function callGeminiDirect<T>(prompt: string): Promise<T> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('Gemini API key is missing. Please set EXPO_PUBLIC_GEMINI_API_KEY in frontend/.env');
+  }
+
   const models = ['gemini-3-flash-preview', 'gemini-flash-latest'];
   let lastErr: any = null;
 
@@ -30,7 +44,9 @@ async function callGeminiDirect<T>(prompt: string): Promise<T> {
       });
 
       if (!response.ok) {
-        throw new Error(`Gemini API HTTP ${response.status}`);
+        const errJson = await response.json().catch(() => null);
+        const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+        throw new Error(`Gemini API: ${errMsg}`);
       }
 
       const data = await response.json();
