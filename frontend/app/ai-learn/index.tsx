@@ -92,7 +92,8 @@ export default function AILearnDashboard() {
         style={[
           styles.topBar,
           {
-            paddingTop: topInset + 6,
+            paddingTop: topInset + 10,
+            paddingBottom: spacing.md + 2,
             borderBottomColor: colors.border,
             backgroundColor: colors.background,
           },
@@ -265,14 +266,12 @@ export default function AILearnDashboard() {
 
         {/* Dynamic AI Modules List Header */}
         <View style={styles.sectionHeader}>
-          <View style={{ flex: 1, paddingRight: spacing.sm }}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-              {roadmap ? 'Personalized Curriculum' : 'ISL Curriculum Modules'}
-            </Text>
-            <Text style={[styles.sectionSubtitle, { color: colors.primary }]}>
-              {roadmap ? '✨ Tailored by Gemini AI' : '9 Modules Available'}
-            </Text>
-          </View>
+          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+            {roadmap ? 'Personalized ISL Curriculum' : 'ISL Curriculum Modules'}
+          </Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.primary }]}>
+            {roadmap ? '✨ Tailored by Gemini AI' : '9 Modules Available'}
+          </Text>
         </View>
 
         {orderedModules.map((mod, index) => {
