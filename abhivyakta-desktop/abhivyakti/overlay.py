@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .region import geo
 from .theme import F, FD, palette, px
-from .widgets import IconButton, Logo, Dot, Tooltip, round_rect
+from .widgets import IconButton, Logo, Dot, Tooltip, load_img, round_rect
 
 PLACEHOLDER = "Letters you sign appear here - click to edit, Enter for a new line."
 
@@ -506,8 +506,12 @@ class MiniPill:
         # Logo circle
         r = H / 2 - px(4)
         cx, cy = px(5) + r, H / 2
-        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=P["accent"], outline="")
-        c.create_text(cx, cy - 1, text="अ", fill="#ffffff", font=FD(10))
+        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#ffffff", outline="")
+        try:
+            self._img = load_img("mark.png", int(r * 1.5))
+            c.create_image(cx, cy, image=self._img)
+        except Exception:
+            c.create_text(cx, cy - 1, text="अ", fill=P["accent"], font=FD(10))
         # App name
         c.create_text(cx + r + px(8), H / 2, text="Abhivyakti", anchor="w", fill=fg, font=F(10, "bold"))
         if self.label:

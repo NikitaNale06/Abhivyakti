@@ -41,7 +41,8 @@ export default function AILearnDashboard() {
 
   const topInset = Math.max(
     insets.top,
-    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 0,
+    Platform.OS === 'android' ? Math.max(StatusBar.currentHeight || 0, 38) : 0,
+    36,
   );
 
   const totalModulesCount = ISL_MODULE_CATALOG.length;

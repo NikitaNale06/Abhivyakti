@@ -1,13 +1,15 @@
 """Main Abhivyakti window: start/stop, what to watch, and settings."""
 import queue
+import threading
 import tkinter as tk
 
+from .auth import AuthClient, AuthError
 from .engine import Engine, app_dir, list_monitors
 from .overlay import CaptionOverlay
 from .region import RegionPicker
-from .settings import Settings
+from .settings import FIXED, Settings
 from .theme import F, enable_dpi_awareness, init_fonts, init_scale, palette, px, system_is_dark
-from .widgets import Button, Dot, Logo, Segmented, Slider, Toggle
+from .widgets import Button, Dot, Field, GoogleButton, Logo, Segmented, Slider, Toggle
 
 
 class App:
@@ -29,6 +31,11 @@ class App:
         self.live = None
         self.hands = 0
         self.page = "home"
+        self.auth = AuthClient()
+        self.auth_busy = False
+        self.view = None
+        self.login_mode = "in"      # in | up
+        self.login_error = None
         self._save_job = None
         self.cfg = {}
         self.sync_cfg()
@@ -48,6 +55,8 @@ class App:
         self.root.deiconify()
         self.root.after(30, self._poll)
         self.root.after(2000, self._keep_top)
+        if self.auth.signed_in:
+            self._auth_worker(self.auth.restore)   # drops back to the login screen if the session expired
 
     # ------------------------------------------------------------ helpers
     def dark(self):
@@ -72,8 +81,7 @@ class App:
 
     def sync_cfg(self):
         s = self.settings
-        self.cfg.update(minConf=float(s["minConf"]), holdMs=float(s["holdMs"]), spaceMs=float(s["spaceMs"]),
-                        maxSide=int(s["maxSide"]), mirror=bool(s["mirror"]), rect=self.capture_rect())
+        self.cfg.update(FIXED, mirror=bool(s["mirror"]), rect=self.capture_rect())
 
     def set(self, key, value):
         self.settings[key] = value
@@ -93,6 +101,8 @@ class App:
 
     # ------------------------------------------------------------ run control
     def toggle_running(self):
+        if not self.auth.signed_in:      # the app does nothing without an account
+            return
         if self.running:
             self.running = False
             self.engine.stop_capture()
@@ -223,31 +233,211 @@ class App:
 
     # ------------------------------------------------------------ UI
     def build_ui(self):
+        """Signed out -> login screen. Signed in -> the main window."""
         if hasattr(self, "shell"):
             self.shell.destroy()
         P = self.P = palette(self.dark())
         self.root.configure(bg=P["bg"])
         self.shell = tk.Frame(self.root, bg=P["bg"])
-        self.shell.pack(fill="both", expand=True, padx=px(16), pady=px(16))
-        sh = self.shell
+        self.shell.pack(fill="both", expand=True, padx=px(20), pady=px(18))
+        self.view = "main" if self.auth.signed_in else "login"
+        if self.view == "login":
+            self._build_login()
+        else:
+            self._build_main()
 
+    def card(self, parent, title=None):
+        P = self.P
+        outer = tk.Frame(parent, bg=P["card"], highlightbackground=P["border"], highlightcolor=P["border"],
+                         highlightthickness=1)
+        outer.pack(fill="x", pady=(0, px(12)))
+        inner = tk.Frame(outer, bg=P["card"])
+        inner.pack(fill="x", padx=px(16), pady=px(14))
+        if title:
+            tk.Label(inner, text=title.upper(), bg=P["card"], fg=P["muted"], font=F(8, "bold")).pack(
+                anchor="w", pady=(0, px(10)))
+        return inner
+
+    def label(self, parent, text, muted=False, bold=False, size=10):
+        P = self.P
+        return tk.Label(parent, text=text, bg=parent["bg"], fg=P["muted"] if muted else P["text"],
+                        font=F(size, "bold" if bold else "normal"), anchor="w", justify="left")
+
+    # ----- Login / create account
+    def _build_login(self):
+        P, sh = self.P, self.shell
+        self.root.title("Abhivyakti - Sign in")
+        W = px(340)
+        col = tk.Frame(sh, bg=P["bg"], width=W)
+        col.pack()
+        Logo(col, 120, P, bg=P["bg"], name="logo.png").pack(pady=(0, px(2)))
+        tk.Label(col, text="Sign in to start translating Indian Sign Language.", bg=P["bg"], fg=P["muted"],
+                 font=F(10), wraplength=W, justify="center").pack(pady=(0, px(14)))
+
+        mode = self.login_mode
+        Segmented(col, P, [("in", "Sign in"), ("up", "Create account")], mode, self._set_login_mode,
+                  bg=P["bg"]).pack(fill="x", pady=(0, px(14)))
+
+        self.l_google = GoogleButton(col, "Continue with Google", self.google_sign_in, P, height=44, bg=P["bg"])
+        self.l_google.pack(fill="x")
+
+        sep = tk.Frame(col, bg=P["bg"])
+        sep.pack(fill="x", pady=px(14))
+        tk.Frame(sep, bg=P["border"], height=1).pack(side="left", fill="x", expand=True, pady=px(1))
+        tk.Label(sep, text="or use email", bg=P["bg"], fg=P["muted"], font=F(9)).pack(side="left", padx=px(10))
+        tk.Frame(sep, bg=P["border"], height=1).pack(side="left", fill="x", expand=True, pady=px(1))
+
+        self.f_name = self.f_confirm = None
+        if mode == "up":
+            self.f_name = Field(col, P, "Full name", bg=P["bg"], on_enter=self.submit_login)
+            self.f_name.pack(fill="x", pady=(0, px(10)))
+        self.f_email = Field(col, P, "Email", bg=P["bg"], on_enter=self.submit_login)
+        self.f_email.pack(fill="x", pady=(0, px(10)))
+        self.f_pass = Field(col, P, "Password", show="•", bg=P["bg"], on_enter=self.submit_login)
+        self.f_pass.pack(fill="x", pady=(0, px(10)))
+        if mode == "up":
+            self.f_confirm = Field(col, P, "Confirm password", show="•", bg=P["bg"], on_enter=self.submit_login)
+            self.f_confirm.pack(fill="x", pady=(0, px(10)))
+
+        self.l_err = tk.Label(col, text="", bg=P["errbg"], fg=P["err"], font=F(9), anchor="w", justify="left",
+                              wraplength=W - px(16), padx=px(8), pady=px(6))
+        self.l_submit = Button(col, "Create account" if mode == "up" else "Sign in", self.submit_login, P,
+                               variant="accent", height=44, size=11, bg=P["bg"])
+        self.l_submit.pack(fill="x", pady=(px(4), 0))
+        self.show_login_error(self.login_error)
+        (self.f_name or self.f_email).focus()
+
+    def _set_login_mode(self, v):
+        if v != self.login_mode and not self.auth_busy:
+            self.login_mode, self.login_error = v, None
+            self.build_ui()
+
+    def show_login_error(self, msg):
+        self.login_error = msg
+        if not hasattr(self, "l_err") or not self.l_err.winfo_exists():
+            return
+        if msg:
+            self.l_err.configure(text=msg)
+            self.l_err.pack(fill="x", before=self.l_submit, pady=(0, px(8)))
+        else:
+            self.l_err.pack_forget()
+
+    def _set_login_busy(self, busy, google=False):
+        if not hasattr(self, "l_submit") or not self.l_submit.winfo_exists():
+            return
+        if google:
+            self.l_google.text = "Waiting for Google...  (click to cancel)" if busy else "Continue with Google"
+            self.l_google.cmd = self.auth.cancel if busy else self.google_sign_in
+            self.l_google._draw()
+        elif busy:
+            self.l_submit.set("Please wait...")
+
+    def google_sign_in(self):
+        if self.auth_busy:
+            return
+        self.show_login_error(None)
+        self._set_login_busy(True, google=True)
+        self._auth_worker(self.auth.sign_in, google=True)
+
+    def submit_login(self):
+        if self.auth_busy:
+            return
+        email, pw = self.f_email.get().strip(), self.f_pass.get()
+        up = self.login_mode == "up"
+        name = self.f_name.get().strip() if up else ""
+        confirm = self.f_confirm.get() if up else ""
+        err = None
+        if up and len(name) < 2:
+            err = "Enter your full name."
+        elif "@" not in email or "." not in email.split("@")[-1]:
+            err = "Enter a valid email address."
+        elif not pw:
+            err = "Enter your password."
+        elif up and len(pw) < 8:
+            err = "Password must be at least 8 characters."
+        elif up and pw != confirm:
+            err = "Passwords do not match."
+        if err:
+            self.show_login_error(err)
+            return
+        self.show_login_error(None)
+        self._set_login_busy(True)
+        if up:
+            self._auth_worker(lambda: self.auth.register(name, email, pw, confirm))
+        else:
+            self._auth_worker(lambda: self.auth.login(email, pw))
+
+    # ----- Auth plumbing
+    def _auth_worker(self, fn, google=False):
+        """Run a blocking auth call off the UI thread, then update the UI."""
+        self.auth_busy = True
+
+        def run():
+            err = None
+            try:
+                fn()
+            except AuthError as e:
+                err = str(e)
+            except Exception:
+                err = "Something went wrong. Please try again."
+            self.root.after(0, lambda: self._auth_done(err, google))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _auth_done(self, err, google=False):
+        self.auth_busy = False
+        was = self.view
+        now = "main" if self.auth.signed_in else "login"
+        if now != was:
+            self.login_error = None if err in (None, "Sign-in cancelled.") else err
+            self.enforce_gate()
+            self.build_ui()
+            self.update_run_ui()
+            return
+        if now == "login":
+            self._set_login_busy(False, google=google)
+            if not google:
+                self.l_submit.set("Create account" if self.login_mode == "up" else "Sign in")
+            self.show_login_error(None if err in (None, "Sign-in cancelled.") else err)
+        elif hasattr(self, "acct_name"):
+            self.fill_account()
+
+    def enforce_gate(self):
+        """Nothing runs while signed out: stop translating and hide the caption box."""
+        if self.auth.signed_in:
+            return
+        if self.running:
+            self.running = False
+            self.engine.stop_capture()
+        self.overlay.suspend()
+        self.overlay.visible = False
+
+    def sign_out(self):
+        if not self.auth_busy:
+            self.login_error = None
+            self._auth_worker(self.auth.sign_out)
+
+    # ----- Main window
+    def _build_main(self):
+        P, sh = self.P, self.shell
+        self.root.title("Abhivyakti")
         head = tk.Frame(sh, bg=P["bg"])
-        head.pack(fill="x", pady=(0, px(14)))
-        Logo(head, 36, P, bg=P["bg"]).pack(side="left")
+        head.pack(fill="x", pady=(0, px(16)))
+        Logo(head, 44, P, bg=P["bg"]).pack(side="left")
         col = tk.Frame(head, bg=P["bg"])
         col.pack(side="left", padx=px(12))
-        tk.Label(col, text="Abhivyakti", bg=P["bg"], fg=P["text"], font=F(15, "bold")).pack(anchor="w")
+        tk.Label(col, text="Abhivyakti", bg=P["bg"], fg=P["text"], font=F(16, "bold")).pack(anchor="w")
         tk.Label(col, text="Screen translator  ·  Offline  ·  ISL", bg=P["bg"], fg=P["muted"],
                  font=F(9)).pack(anchor="w")
 
-        self.tabs = Segmented(sh, P, [("home", "Translate"), ("detect", "Detection"), ("display", "Display")],
+        self.tabs = Segmented(sh, P, [("home", "Translate"), ("display", "Display"), ("account", "Account")],
                               self.page, self.show_page, bg=P["bg"])
-        self.tabs.pack(fill="x", pady=(0, px(12)))
+        self.tabs.pack(fill="x", pady=(0, px(14)))
 
-        self.host = tk.Frame(sh, bg=P["bg"], width=px(368))
+        self.host = tk.Frame(sh, bg=P["bg"], width=px(372))
         self.host.pack(fill="both", expand=True)
         self.host.pack_propagate(False)
-        self.pages = {"home": self._page_home(), "detect": self._page_detect(), "display": self._page_display()}
+        self.pages = {"home": self._page_home(), "display": self._page_display(), "account": self._page_account()}
 
         # make the window tall enough for the tallest tab, so it never jumps when switching
         tallest = 0
@@ -257,6 +447,8 @@ class App:
             tallest = max(tallest, f.winfo_reqheight())
             f.pack_forget()
         self.host.configure(height=tallest + px(4))
+        if self.page not in self.pages:
+            self.page = "home"
         self.show_page(self.page)
         self.update_run_ui()
         self.refresh_live()
@@ -269,34 +461,17 @@ class App:
             else:
                 f.pack_forget()
 
-    def card(self, parent, title=None):
-        P = self.P
-        outer = tk.Frame(parent, bg=P["card"], highlightbackground=P["border"], highlightcolor=P["border"],
-                         highlightthickness=1)
-        outer.pack(fill="x", pady=(0, px(12)))
-        inner = tk.Frame(outer, bg=P["card"])
-        inner.pack(fill="x", padx=px(14), pady=px(12))
-        if title:
-            tk.Label(inner, text=title.upper(), bg=P["card"], fg=P["muted"], font=F(8, "bold")).pack(
-                anchor="w", pady=(0, px(8)))
-        return inner
-
-    def label(self, parent, text, muted=False, bold=False, size=10):
-        P = self.P
-        return tk.Label(parent, text=text, bg=P["card"], fg=P["muted"] if muted else P["text"],
-                        font=F(size, "bold" if bold else "normal"), anchor="w", justify="left")
-
     # ----- Translate tab
     def _page_home(self):
         P = self.P
         f = tk.Frame(self.host, bg=P["bg"])
         hero = self.card(f)
-        self.btn_run = Button(hero, "Start translating", self.toggle_running, P, variant="accent", height=46,
-                              icon="play", size=11, bg=P["card"])
+        self.btn_run = Button(hero, "Start translating", self.toggle_running, P, variant="accent", height=52,
+                              icon="play", size=12, bg=P["card"])
         self.btn_run.pack(fill="x")
         row = tk.Frame(hero, bg=P["card"])
-        row.pack(fill="x", pady=(px(12), 0))
-        self.m_dot = Dot(row, P["muted"], P["card"], 8)
+        row.pack(fill="x", pady=(px(14), 0))
+        self.m_dot = Dot(row, P["muted"], P["card"], 9)
         self.m_dot.pack(side="left")
         self.m_status = tk.Label(row, text="", bg=P["card"], fg=P["muted"], font=F(10), anchor="w")
         self.m_status.pack(side="left", padx=(px(8), 0))
@@ -312,7 +487,7 @@ class App:
         Segmented(cap, P, [("screen", "Full screen"), ("area", "Selected area")], self.settings["source"],
                   self._on_source, bg=P["card"]).pack(fill="x")
         self.cap_sub = tk.Frame(cap, bg=P["card"], height=px(70))
-        self.cap_sub.pack(fill="x", pady=(px(10), 0))
+        self.cap_sub.pack(fill="x", pady=(px(12), 0))
         self.cap_sub.pack_propagate(False)
         self.fill_capture_sub()
         return f
@@ -357,11 +532,11 @@ class App:
             self.label(self.cap_sub, "Draw a box around the person signing or their video tile.",
                        muted=True, size=9).pack(anchor="w", pady=(px(8), 0))
 
-    # ----- Detection tab
+    # ----- Display tab
     def _slider_row(self, parent, text, key, lo, hi, step, fmt):
         P = self.P
         row = tk.Frame(parent, bg=P["card"])
-        row.pack(fill="x", pady=(0, px(10)))
+        row.pack(fill="x", pady=(0, px(12)))
         top = tk.Frame(row, bg=P["card"])
         top.pack(fill="x")
         self.label(top, text, bold=True).pack(side="left")
@@ -374,18 +549,6 @@ class App:
 
         Slider(row, P, lo, hi, step, self.settings[key], on, bg=P["card"]).pack(fill="x", pady=(px(4), 0))
 
-    def _page_detect(self):
-        P = self.P
-        f = tk.Frame(self.host, bg=P["bg"])
-        c = self.card(f, "Detection")
-        self._slider_row(c, "Minimum confidence", "minConf", 0.4, 0.95, 0.05, lambda v: f"{v:.2f}")
-        self._slider_row(c, "Hold before a letter is accepted", "holdMs", 100, 900, 50, lambda v: f"{int(v)} ms")
-        self._slider_row(c, "Pause that adds a space", "spaceMs", 600, 4000, 100, lambda v: f"{int(v)} ms")
-        tk.Label(c, text="Lower confidence or hold time makes it faster but noisier.", bg=P["card"], fg=P["muted"],
-                 font=F(9), anchor="w").pack(fill="x")
-        return f
-
-    # ----- Display tab
     def _page_display(self):
         P = self.P
         f = tk.Frame(self.host, bg=P["bg"])
@@ -393,24 +556,48 @@ class App:
         s = self.settings
 
         def block(title):
-            self.label(c, title, bold=True).pack(anchor="w", pady=(0, px(4)))
+            self.label(c, title, bold=True).pack(anchor="w", pady=(0, px(5)))
 
         block("Appearance")
         Segmented(c, P, [("system", "System"), ("light", "Light"), ("dark", "Dark")], s["theme"],
-                  self._on_theme, height=30, bg=P["card"]).pack(fill="x", pady=(0, px(10)))
+                  self._on_theme, height=30, bg=P["card"]).pack(fill="x", pady=(0, px(12)))
         block("Caption box starts in the")
         Segmented(c, P, [("tl", "Top left"), ("tr", "Top right")], s["corner"], self._on_corner, height=30,
-                  bg=P["card"]).pack(fill="x", pady=(0, px(10)))
+                  bg=P["card"]).pack(fill="x", pady=(0, px(12)))
         self._slider_row(c, "Caption text size", "textSize", 12, 40, 1, lambda v: f"{int(v)} px")
-        block("Frame size  (bigger finds small hands, but is slower)")
-        Segmented(c, P, [(v, str(v)) for v in (768, 1024, 1280, 1600)], int(s["maxSide"]),
-                  lambda v: self.set("maxSide", int(v)), height=30, bg=P["card"]).pack(fill="x", pady=(0, px(10)))
         row = tk.Frame(c, bg=P["card"])
         row.pack(fill="x")
         self.label(row, "Mirror frames", bold=True).pack(side="left")
         Toggle(row, P, s["mirror"], lambda v: self.set("mirror", bool(v)), bg=P["card"]).pack(side="right")
         self.label(c, "Try this if the letters come out wrong.", muted=True, size=9).pack(anchor="w")
         return f
+
+    # ----- Account tab
+    def _page_account(self):
+        P = self.P
+        f = tk.Frame(self.host, bg=P["bg"])
+        c = self.card(f, "Account")
+        u = self.auth.user or {}
+        name = u.get("display_name") or u.get("email") or "Signed in"
+        row = tk.Frame(c, bg=P["card"])
+        row.pack(fill="x")
+        s = px(46)
+        av = tk.Canvas(row, width=s, height=s, bg=P["card"], highlightthickness=0, bd=0)
+        av.create_oval(0, 0, s - 1, s - 1, fill=P["soft"], outline="")
+        av.create_text(s / 2, s / 2, text=name[:1].upper(), fill=P["accent"], font=F(15, "bold"))
+        av.pack(side="left")
+        col = tk.Frame(row, bg=P["card"])
+        col.pack(side="left", padx=px(12))
+        self.acct_name = tk.Label(col, text=name, bg=P["card"], fg=P["text"], font=F(11, "bold"), anchor="w")
+        self.acct_name.pack(anchor="w")
+        if u.get("email"):
+            tk.Label(col, text=u["email"], bg=P["card"], fg=P["muted"], font=F(9), anchor="w").pack(anchor="w")
+        self.btn_out = Button(c, "Sign out", self.sign_out, P, variant="field", height=40, size=10, bg=P["card"])
+        self.btn_out.pack(fill="x", pady=(px(16), 0))
+        return f
+
+    def fill_account(self):
+        pass
 
     def _on_theme(self, v):
         self.settings["theme"] = v

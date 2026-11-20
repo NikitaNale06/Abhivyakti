@@ -22,12 +22,22 @@ const GEMINI_API_KEY =
   (Constants?.expoConfig?.extra as any)?.geminiApiKey ||
   '';
 
+// Track if Cloud Run learn endpoints are available in current session to avoid 3s connection lag
+let isLearnBackendAvailable: boolean | null = null;
+
 async function callGeminiDirect<T>(prompt: string): Promise<T> {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API key is missing. Please set EXPO_PUBLIC_GEMINI_API_KEY in frontend/.env');
   }
 
-  const models = ['gemini-3-flash-preview', 'gemini-flash-latest'];
+  // Prioritize high-speed, high-quota official Gemini models to avoid 429 quota exhaustion
+  const models = [
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-flash-latest',
+    'gemini-3-flash-preview',
+  ];
   let lastErr: any = null;
 
   for (const model of models) {
@@ -46,6 +56,11 @@ async function callGeminiDirect<T>(prompt: string): Promise<T> {
       if (!response.ok) {
         const errJson = await response.json().catch(() => null);
         const errMsg = errJson?.error?.message || `HTTP ${response.status}`;
+        // If quota exceeded on this model, immediately try next available Gemini model
+        if (response.status === 429) {
+          console.warn(`[learningService] ${model} hit quota limit, failing over...`);
+          continue;
+        }
         throw new Error(`Gemini API: ${errMsg}`);
       }
 
@@ -57,8 +72,9 @@ async function callGeminiDirect<T>(prompt: string): Promise<T> {
 
       const cleaned = rawText.replace(/```(?:json)?\s*/g, '').replace(/```\s*$/g, '').trim();
       return JSON.parse(cleaned) as T;
-    } catch (err) {
+    } catch (err: any) {
       lastErr = err;
+      console.warn(`[learningService] Error with ${model}:`, err?.message || err);
     }
   }
 
@@ -231,6 +247,10 @@ export const ISL_MODULE_CATALOG: ISLModuleDef[] = [
 ];
 
 async function postToBackend<T>(endpoint: string, payload: any, token?: string): Promise<T> {
+  if (isLearnBackendAvailable === false) {
+    throw new Error('Backend learn endpoints offline');
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -238,18 +258,35 @@ async function postToBackend<T>(endpoint: string, payload: any, token?: string):
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 1200);
 
-  if (!response.ok) {
-    throw new Error(`Server returned HTTP ${response.status}`);
+  try {
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        isLearnBackendAvailable = false;
+      }
+      throw new Error(`Server returned HTTP ${response.status}`);
+    }
+
+    isLearnBackendAvailable = true;
+    const resJson = await response.json();
+    return (resJson.data ?? resJson) as T;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (isLearnBackendAvailable === null) {
+      isLearnBackendAvailable = false;
+    }
+    throw err;
   }
-
-  const resJson = await response.json();
-  return (resJson.data ?? resJson) as T;
 }
 
 export async function submitAssessment(
@@ -391,7 +428,38 @@ STRICT RULES:
   "scene_prompt": "A one-sentence description of an everyday scene illustrating this topic (NO hand signs)"
 }
 `;
-    return await callGeminiDirect<LessonResponseData>(prompt);
+    const res = await callGeminiDirect<LessonResponseData>(prompt);
+    return {
+      title: res.title || `${topic} in ISL`,
+      module: res.module || moduleId,
+      topic: res.topic || topic,
+      level: res.level || level,
+      duration_minutes: res.duration_minutes || 10,
+      objectives:
+        res.objectives && res.objectives.length > 0
+          ? res.objectives
+          : [`Understand communicative purpose of ${topic}`, 'Observe standard ISL visual etiquette'],
+      introduction: res.introduction || `This lesson covers essential fundamentals of ${topic} in Indian Sign Language.`,
+      sections:
+        res.sections && res.sections.length > 0
+          ? res.sections
+          : [
+              {
+                heading: 'Visual Etiquette & Context',
+                content: `In Indian Sign Language, ${topic} relies on spatial awareness and facial expression. Refer to the visual demonstration in the app for exact hand configurations.`,
+                key_points: ['Maintain comfortable signing space', 'Incorporate natural facial grammar'],
+                example: 'Common daily interaction',
+              },
+            ],
+      key_signs: res.key_signs || [],
+      practice_activities:
+        res.practice_activities && res.practice_activities.length > 0
+          ? res.practice_activities
+          : ['Practice in front of a mirror', 'Verify your sign in the Abhivyakti visual model'],
+      summary: res.summary || `You have completed the key learning points for ${topic}.`,
+      next_topic_hint: res.next_topic_hint || 'Test your understanding with a short mastery quiz.',
+      scene_prompt: res.scene_prompt,
+    };
   }
 }
 
@@ -559,44 +627,32 @@ export async function fetchRoadmapContent(
     // ---------------------------------------------------------------------------------
 
     console.log('[learningService] Generating personalized roadmap via live Gemini API with user answers...');
+    interface CompactRoadmapGeminiResponse {
+      level?: LearnerLevel;
+      estimated_total_hours?: number;
+      daily_goal_minutes?: number;
+      personalized_message?: string;
+      quick_wins?: string[];
+      module_priorities?: Array<{
+        id: string;
+        priority: number;
+        reason?: string;
+      }>;
+    }
+
     const prompt = `
 You are an expert Indian Sign Language (ISL) learning tutor in the Abhivyakti app.
 
-A learner just completed the ISL Personalization Questionnaire with these specific answers:
+A learner personalized their ISL Roadmap with these specific answers:
 - Learner Level Evaluated: ${level}
 - Prior ISL Experience: ${userPreferences?.prior_experience || 'none'}
 - Fingerspelling Familiarity: ${userPreferences?.fingerspelling || 'none'}
-- Primary Learning Goal: ${userPreferences?.learning_goal || 'general'}
+- Primary Learning Goal: ${userPreferences?.learning_goal || 'general communication'}
 - Priority Topic Selected: ${userPreferences?.priority_topic || 'basics'}
 - Daily Commitment: ${dailyGoalMinutes} minutes
 - Areas Needing Focus: ${JSON.stringify(weakTopics)}
 
-Based strictly on this user's specific answers, generate a completely personalized ISL learning roadmap.
-Elevate the module that matches their Priority Topic and Learning Goal to Priority #1 or #2.
-
-Return ONLY valid JSON matching this schema (no markdown fences):
-{
-  "level": "${level}",
-  "total_modules": 9,
-  "estimated_total_hours": 6.5,
-  "daily_goal_minutes": ${dailyGoalMinutes},
-  "personalized_message": "2-3 sentences explaining exactly how this roadmap is tailored to their answers (${userPreferences?.learning_goal || ''}, ${userPreferences?.priority_topic || ''}).",
-  "quick_wins": ["Milestone 1 directly aligned with their goal", "Milestone 2"],
-  "modules": [
-    {
-      "id": "module_id_slug",
-      "title": "Module title",
-      "description": "Why this module is scheduled here based on their answers",
-      "estimated_duration_minutes": 30,
-      "topics": ["topic 1", "topic 2", "topic 3"],
-      "priority": 1,
-      "icon": "hand-left"
-    }
-  ]
-}
-
-Order all 9 modules from Priority 1 (highest) to Priority 9.
-The 9 module IDs must be:
+Based strictly on this user's specific answers, assign priority 1 (highest) to 9 for the 9 modules:
 - basics
 - alphabets-numbers
 - greetings
@@ -606,10 +662,49 @@ The 9 module IDs must be:
 - healthcare
 - workplace
 - advanced
+
+Elevate the module matching their Priority Topic and Learning Goal to Priority 1.
+
+Return ONLY valid JSON matching this schema (no markdown fences):
+{
+  "level": "${level}",
+  "estimated_total_hours": 6.5,
+  "daily_goal_minutes": ${dailyGoalMinutes},
+  "personalized_message": "2-3 sentences explaining exactly how this roadmap is tailored to their answers (${userPreferences?.learning_goal || ''}, ${userPreferences?.priority_topic || ''}).",
+  "quick_wins": ["Milestone 1 directly aligned with their goal", "Milestone 2"],
+  "module_priorities": [
+    { "id": "module_id", "priority": 1, "reason": "Why prioritized based on their goal" }
+  ]
+}
 `;
-    const res = await callGeminiDirect<RoadmapResponseData>(prompt);
+    const res = await callGeminiDirect<CompactRoadmapGeminiResponse>(prompt);
+
+    // Merge priorities with local ISL_MODULE_CATALOG for instant fast generation & rich metadata
+    const priorityMap = new Map((res.module_priorities || []).map((p) => [p.id, p]));
+    const fullModules: RoadmapModuleItem[] = ISL_MODULE_CATALOG.map((cat, idx) => {
+      const pInfo = priorityMap.get(cat.id);
+      return {
+        id: cat.id,
+        title: cat.title,
+        description: pInfo?.reason || cat.description,
+        estimated_duration_minutes: cat.estimatedMinutes,
+        topics: cat.topics,
+        priority: pInfo ? pInfo.priority : idx + 1,
+        icon: cat.icon,
+      };
+    });
+    fullModules.sort((a, b) => a.priority - b.priority);
+
     return {
-      ...res,
+      level: res.level || level,
+      total_modules: fullModules.length,
+      estimated_total_hours: res.estimated_total_hours || 6.5,
+      daily_goal_minutes: res.daily_goal_minutes || dailyGoalMinutes,
+      personalized_message:
+        res.personalized_message ||
+        'Your personalized Indian Sign Language curriculum is tailored to your learning goals.',
+      quick_wins: res.quick_wins || ['Start with your recommended priority module', 'Dedicate 15 mins daily'],
+      modules: fullModules,
       generatedAt: new Date().toISOString(),
     };
   }

@@ -1,9 +1,14 @@
 (() => {
   if (window.__abhLoaded) return; window.__abhLoaded = true;
   const EXT_ORIGIN = new URL(chrome.runtime.getURL('/')).origin;
-  const DEFAULTS = { enabled: true, mode: 'all', minConf: 0.75, holdMs: 300, spaceMs: 1500, mirror: false, maxSide: 512, theme: 'system', pw2: 1, ph2: 84 };
+  // Detection tuning is fixed (not user-configurable).
+  const FIXED = { minConf: 0.70, holdMs: 300, spaceMs: 1500, maxSide: 512 };
+  const DEFAULTS = { enabled: true, mode: 'all', mirror: false, theme: 'system', pw2: 1, ph2: 84, auth: null };
+  // The extension only works while signed in.
+  const active = () => !!settings.enabled && !!(settings.auth && settings.auth.refreshToken);
+  const MARK_URL = chrome.runtime.getURL('icons/mark.png');
   const MAX_VIDEOS = 4, MIN_GAP_MS = 33, MIN_W = 200, MIN_H = 120, MIN_PW = 240, MIN_PH = 64;
-  let settings = { ...DEFAULTS };
+  let settings = { ...DEFAULTS, ...FIXED };
   const tracks = new Map();          // video -> Track
   const saved = new WeakMap();       // video -> {text, pref, minimized}  (survives scrolling out of view)
   const hosts = new Set();           // our overlay hosts (for the keyboard shield)
@@ -16,10 +21,10 @@
   // ---------- settings ----------
   const applySettings = () => { tracks.forEach((t) => { Object.assign(t.cap.opts, { minConf: +settings.minConf, holdMs: +settings.holdMs, spaceMs: +settings.spaceMs }); t.ui.render(); }); };
   try {
-    chrome.storage.local.get(DEFAULTS).then((s) => { settings = { ...DEFAULTS, ...s }; applySettings(); });
+    chrome.storage.local.get(DEFAULTS).then((s) => { settings = { ...DEFAULTS, ...s, ...FIXED }; applySettings(); if (!active()) removeAll(); });
     chrome.storage.onChanged.addListener((ch) => {
-      for (const k in ch) settings[k] = ch[k].newValue;
-      applySettings(); if (!settings.enabled) removeAll();
+      for (const k in ch) if (!(k in FIXED)) settings[k] = ch[k].newValue;
+      applySettings(); if (!active()) removeAll();
     });
   } catch (_) {}
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -132,7 +137,7 @@
       // panel
       const panel = this.panel = el('div', 'panel');
       const head = this.head = el('div', 'head');
-      const logo = el('div', 'logo', 'अ');
+      const logo = el('div', 'logo'); logo.style.background = `url(${MARK_URL}) center/contain no-repeat`;
       this.title = el('div', 'title', 'Abhivyakta');
       this.stat = el('div', 'stat'); this.statDot = el('div', 'dot'); this.statTxt = el('span', '', ''); this.stat.append(this.statDot, this.statTxt);
       this.live = el('div', 'live off'); this.liveL = el('b', '', '–'); this.liveP = el('i', '', ''); this.live.append(this.liveL, this.liveP);
@@ -156,7 +161,7 @@
 
       // minimized pill
       const pill = this.pill = el('button', 'pill'); pill.type = 'button'; pill.title = 'Open Abhivyakta';
-      this.pillLogo = el('span', 'logo', 'अ'); this.pillName = el('span', 'pt', 'Abhivyakta'); this.pillL = el('span', 'pl hidden', '');
+      this.pillLogo = el('span', 'logo'); this.pillLogo.style.background = `#fff url(${MARK_URL}) center/80% no-repeat`; this.pillName = el('span', 'pt', 'Abhivyakta'); this.pillL = el('span', 'pl hidden', '');
       pill.append(this.pillLogo, this.pillName, this.pillL);
       pill.addEventListener('click', () => { this.minimized = false; this.render(); this.place(); });
 
@@ -306,7 +311,7 @@
   };
   function dropTrack(v, t) { saved.set(v, t.ui.snapshot()); t.ui.destroy(); tracks.delete(v); }
   function scan() {
-    if (!settings.enabled) return removeAll();
+    if (!active()) return removeAll();
     const vids = [...document.querySelectorAll('video')].filter(usable)
       .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)
       .slice(0, settings.mode === 'largest' ? 1 : MAX_VIDEOS);
@@ -319,7 +324,7 @@
   // ---------- main loop ----------
   const fit = (w, h, max) => { const k = Math.min(1, max / Math.max(w, h)); return [Math.max(2, Math.round(w * k)), Math.max(2, Math.round(h * k))]; };
   async function step() {
-    if (!settings.enabled || !tracks.size || !engine || engine.state !== 'ready') return 250;
+    if (!active() || !tracks.size || !engine || engine.state !== 'ready') return 250;
     const list = [...tracks.values()];
     for (let n = 0; n < list.length; n++) {
       const t = list[(rr++) % list.length], v = t.video;

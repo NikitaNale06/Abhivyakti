@@ -36,35 +36,35 @@ export default function LessonScreen() {
   const [loading, setLoading] = useState(true);
   const [lesson, setLesson] = useState<LessonResponseData | null>(null);
   const [scenarioImage, setScenarioImage] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    async function load() {
-      setLoading(true);
-      try {
-        const data = await fetchLessonContent(moduleId, topic, profile.level);
-        if (mounted) {
-          setLesson(data);
-        }
+  const loadLesson = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const data = await fetchLessonContent(moduleId, topic, profile.level);
+      setLesson(data);
 
-        // Fetch scene image illustration
-        if (data.scene_prompt) {
-          fetchScenarioImage(topic, data.scene_prompt).then((imgRes) => {
-            if (mounted && imgRes.image_base64) {
+      // Fetch scene image illustration
+      if (data.scene_prompt) {
+        fetchScenarioImage(topic, data.scene_prompt)
+          .then((imgRes) => {
+            if (imgRes?.image_base64) {
               setScenarioImage(imgRes.image_base64);
             }
-          });
-        }
-      } catch (err: any) {
-        console.warn('Error loading lesson:', err);
-      } finally {
-        if (mounted) setLoading(false);
+          })
+          .catch(() => {});
       }
+    } catch (err: any) {
+      console.warn('Error loading lesson:', err);
+      setErrorMsg(err?.message || 'Failed to load lesson from Gemini AI');
+    } finally {
+      setLoading(false);
     }
-    load();
-    return () => {
-      mounted = false;
-    };
+  };
+
+  useEffect(() => {
+    loadLesson();
   }, [moduleId, topic, profile.level]);
 
   if (loading) {
@@ -72,7 +72,7 @@ export default function LessonScreen() {
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
         <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          AI tutor is tailoring your lesson...
+          AI tutor is tailoring your lesson with Gemini AI...
         </Text>
       </View>
     );
@@ -82,15 +82,29 @@ export default function LessonScreen() {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <Ionicons name="alert-circle-outline" size={48} color={colors.error} />
-        <Text style={[styles.title, { color: colors.textPrimary, marginTop: spacing.md }]}>
+        <Text style={[styles.title, { color: colors.textPrimary, marginTop: spacing.md, textAlign: 'center' }]}>
           Unable to load lesson
         </Text>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={[styles.backBtn, { backgroundColor: colors.primary }]}
-        >
-          <Text style={{ color: '#FFF', fontWeight: '600' }}>Go Back</Text>
-        </TouchableOpacity>
+        {errorMsg ? (
+          <Text style={[styles.errorSub, { color: colors.textSecondary }]}>
+            {errorMsg}
+          </Text>
+        ) : null}
+        <View style={styles.errorBtnRow}>
+          <TouchableOpacity
+            onPress={loadLesson}
+            style={[styles.retryBtn, { backgroundColor: colors.primary }]}
+          >
+            <Ionicons name="refresh" size={16} color="#FFF" style={{ marginRight: 6 }} />
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Retry Lesson</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={[styles.backBtn, { borderColor: colors.border }]}
+          >
+            <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -244,11 +258,31 @@ const styles = StyleSheet.create({
     ...typography.body,
     marginTop: spacing.md,
   },
-  backBtn: {
+  errorSub: {
+    ...typography.caption,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  errorBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     marginTop: spacing.md,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
+  },
+  backBtn: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
   },
   header: {
     flexDirection: 'row',

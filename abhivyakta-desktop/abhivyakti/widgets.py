@@ -1,6 +1,9 @@
 """Small canvas-drawn widgets (rounded buttons, segmented control, slider, toggle, icon buttons)."""
 import tkinter as tk
+from pathlib import Path
 from tkinter import font as tkfont
+
+from PIL import Image, ImageDraw, ImageTk
 
 from .theme import F, FD, px, shade
 
@@ -82,13 +85,46 @@ class Tooltip:
             self.tip = None
 
 
-# ---------------------------------------------------------------- logo
+# ---------------------------------------------------------------- images / logo
+_ASSETS = Path(__file__).resolve().parent.parent / "assets"
+_IMG_CACHE = {}
+
+
+def load_img(name, size):
+    """assets/<name> scaled to fit size x size screen pixels (kept alive in a cache)."""
+    key = (name, size)
+    if key not in _IMG_CACHE:
+        im = Image.open(_ASSETS / name).convert("RGBA")
+        im.thumbnail((size, size), Image.LANCZOS)
+        _IMG_CACHE[key] = ImageTk.PhotoImage(im)
+    return _IMG_CACHE[key]
+
+
+def _google_g(size):
+    """A small four-colour Google 'G' drawn with Pillow (no external asset needed)."""
+    k = 4
+    s = size * k
+    im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    m, wd = int(s * 0.08), int(s * 0.19)
+    box = (m, m, s - m, s - m)
+    for a0, a1, col in ((215, 322, "#EA4335"), (140, 215, "#FBBC05"), (40, 140, "#34A853"), (322, 400, "#4285F4")):
+        d.arc(box, a0, a1, fill=col, width=wd)
+    cy = s // 2
+    d.rectangle((s // 2, cy - wd // 2, s - m, cy + wd // 2), fill="#4285F4")
+    return ImageTk.PhotoImage(im.resize((size, size), Image.LANCZOS))
+
+
 class Logo(tk.Canvas):
-    def __init__(self, parent, size, pal, bg=None):
+    """The Abhivyakti mark (assets/mark.png)."""
+    def __init__(self, parent, size, pal, bg=None, name="mark.png"):
         s = px(size)
         super().__init__(parent, width=s, height=s, bg=bg or pal["bg"], highlightthickness=0, bd=0)
-        round_rect(self, 0, 0, s, s, s * 0.28, fill=pal["accent"], outline="")
-        self.create_text(s / 2, s / 2 - 1, text="अ", fill="#ffffff", font=FD(max(7, size * 0.38)))
+        try:
+            self.img = load_img(name, s)
+            self.create_image(s / 2, s / 2, image=self.img)
+        except Exception:
+            round_rect(self, 0, 0, s, s, s * 0.28, fill=pal["accent"], outline="")
 
 
 # ---------------------------------------------------------------- status dot
@@ -333,3 +369,41 @@ class Slider(tk.Canvas):
                 self.cmd(v, False)
         if final and self.cmd:
             self.cmd(self.value, True)
+
+
+# ---------------------------------------------------------------- Google button
+class GoogleButton(Button):
+    def __init__(self, parent, text, command, pal, height=42, size=10, bg=None):
+        super().__init__(parent, text, command, pal, variant="field", height=height, size=size, bg=bg)
+        self.g = _google_g(px(18))
+
+    def _draw(self):
+        super()._draw()
+        tw = self.font.measure(self.text)
+        self.create_image((self.w - tw) / 2 - px(14), self.h / 2, image=self.g)
+
+
+# ---------------------------------------------------------------- text field
+class Field(tk.Frame):
+    """Labelled single-line entry with a focus ring. Use .get() / .focus()."""
+    def __init__(self, parent, pal, label, show=None, bg=None, on_enter=None):
+        super().__init__(parent, bg=bg or pal["card"])
+        self.p = pal
+        tk.Label(self, text=label, bg=bg or pal["card"], fg=pal["text"], font=F(9, "bold"), anchor="w").pack(
+            fill="x", pady=(0, px(4)))
+        self.ring = tk.Frame(self, bg=pal["border"], padx=1, pady=1)
+        self.ring.pack(fill="x")
+        self.entry = tk.Entry(self.ring, show=show or "", relief="flat", bd=0, font=F(10), bg=pal["field"],
+                              fg=pal["text"], insertbackground=pal["text"], highlightthickness=0,
+                              selectbackground=pal["accent"], selectforeground=pal["onaccent"])
+        self.entry.pack(fill="x", ipady=px(7), padx=px(1))
+        self.entry.bind("<FocusIn>", lambda e: self.ring.configure(bg=pal["accent"]))
+        self.entry.bind("<FocusOut>", lambda e: self.ring.configure(bg=pal["border"]))
+        if on_enter:
+            self.entry.bind("<Return>", lambda e: on_enter())
+
+    def get(self):
+        return self.entry.get()
+
+    def focus(self):
+        self.entry.focus_set()

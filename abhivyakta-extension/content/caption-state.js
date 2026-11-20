@@ -6,7 +6,7 @@
   // Same logic as realtime_isl.py: confidence >= minConf and the same label held
   // before it is committed; commits once until the label changes or the hand leaves.
   class CaptionState {
-    constructor(opts) { this.opts = Object.assign({ minConf: 0.75, holdMs: 300, minSamples: 2, spaceMs: 1500 }, opts); this.reset(); }
+    constructor(opts) { this.opts = Object.assign({ minConf: 0.70, holdMs: 300, minSamples: 2, spaceMs: 1500 }, opts); this.reset(); }
     reset() { this.text = ''; this.cand = null; this.count = 0; this.candSince = null; this.locked = false; this.noHandSince = null; this.live = null; }
     update(r, now) {
       const o = this.opts; let add = '';

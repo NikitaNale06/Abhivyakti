@@ -13,6 +13,10 @@ On the first start the app downloads the small hand model (hand_landmarker.task,
 into the "models" folder. If you are offline, copy that file there yourself (the same
 file the extension uses) and start again.
 
+SIGN IN
+  The app needs an account: sign in with Google, or with email + password (use "Create account"
+  the first time). Sign out is on the Account tab.
+
 USE
   1. Press "Start translating".
   2. Under "What to watch" pick Full screen, or "Selected area" and drag a box around
@@ -31,14 +35,14 @@ THE CAPTION BOX
   - Minimize turns it into an orange pill at the bottom-left of what you are watching.
     It keeps translating; click the pill to reopen it (drag it to move it).
 
-SETTINGS (Detection / Display tabs)
-  Minimum confidence, hold time, space pause, theme (System / Light / Dark),
-  caption corner, text size, frame size, mirror frames.
+SETTINGS (Display tab)
+  Theme (System / Light / Dark), caption corner, text size, mirror frames.
+  Detection tuning is built in (confidence 0.70, hold 300 ms, space pause 1500 ms, frame 512).
   Settings are remembered in  %APPDATA%\Abhivyakti\settings.json  (or ~/.config/abhivyakti).
 
 IF SOMETHING FAILS
   - "Setup needed": read the message in the app - usually a missing package or the
     hand model could not be downloaded.
-  - Letters wrong: switch "Mirror frames", or draw a tighter area, or raise Frame size.
+  - Letters wrong: switch "Mirror frames", or draw a tighter area.
   - macOS: allow Screen Recording for Terminal / Python in System Settings > Privacy.
   - Linux: screen capture works on X11; Wayland desktops usually block it.

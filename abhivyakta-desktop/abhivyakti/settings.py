@@ -10,16 +10,16 @@ DEFAULTS = {
     "source": "screen",       # screen | area
     "monitor": 0,             # index into the monitor list
     "area": None,             # {"left","top","width","height"} in screen pixels
-    "minConf": 0.75,
-    "holdMs": 300,
-    "spaceMs": 1500,
-    "maxSide": 1280,          # longest side of the frame sent to the hand model
     "mirror": False,
     "textSize": 18,           # caption text size in px
     "corner": "tr",           # tr | tl  (where the caption box starts)
     "overlay": {"x": None, "y": None, "w": None, "h": None},
     "pill": None,             # {"x","y"} of the minimized pill
 }
+
+
+# Detection tuning is fixed (not user-configurable).
+FIXED = {"minConf": 0.70, "holdMs": 300, "spaceMs": 1500, "maxSide": 512}
 
 
 def config_dir() -> Path:
@@ -52,16 +52,10 @@ class Settings(dict):
                 self[k] = {**DEFAULTS["overlay"], **v}
             else:
                 self[k] = v
-        # keep numbers sane even if the file was edited by hand
         try:
-            self["minConf"] = min(0.95, max(0.4, float(self["minConf"])))
-            self["holdMs"] = int(min(900, max(100, float(self["holdMs"]))))
-            self["spaceMs"] = int(min(4000, max(600, float(self["spaceMs"]))))
-            self["maxSide"] = int(min(2000, max(384, float(self["maxSide"]))))
             self["textSize"] = int(min(40, max(12, float(self["textSize"]))))
         except (TypeError, ValueError):
-            for k in ("minConf", "holdMs", "spaceMs", "maxSide", "textSize"):
-                self[k] = DEFAULTS[k]
+            self["textSize"] = DEFAULTS["textSize"]
         if self["theme"] not in ("system", "light", "dark"):
             self["theme"] = "system"
         if self["corner"] not in ("tr", "tl"):

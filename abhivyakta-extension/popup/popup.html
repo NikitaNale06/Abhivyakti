@@ -1,29 +1,54 @@
-<!doctype html><meta charset="utf-8"><title>Abhivyakta</title>
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Abhivyakti</title>
 <link rel="stylesheet" href="popup.css">
-<header>
-  <div class="logo">अ</div>
-  <div><h1>Abhivyakta</h1><p>Offline · On-device · ISL</p></div>
-  <label class="switch" title="Turn translation on or off"><input type="checkbox" id="enabled"><span></span></label>
-</header>
 
-<section class="card">
-  <label class="field"><span>Appearance</span>
-    <select id="theme"><option value="system">System default</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
-  <label class="field"><span>Which videos</span>
-    <select id="mode"><option value="all">All visible videos (up to 4, e.g. Meet)</option><option value="largest">Largest video only (faster)</option></select></label>
-</section>
+<!-- Signed out: sign in / create account -->
+<main id="authView" hidden>
+  <div class="brand"><img src="../icons/logo.png" alt="Abhivyakti" width="112" height="112"></div>
+  <p class="tag">Sign in to start translating Indian Sign Language.</p>
 
-<section class="card">
-  <label class="field"><span>Minimum confidence <b id="minConfV"></b></span><input type="range" id="minConf" min="0.4" max="0.95" step="0.05"></label>
-  <label class="field"><span>Hold before a letter is accepted <b><em id="holdMsV"></em> ms</b></span><input type="range" id="holdMs" min="100" max="900" step="50"></label>
-  <label class="field"><span>Pause that adds a space <b><em id="spaceMsV"></em> ms</b></span><input type="range" id="spaceMs" min="600" max="4000" step="100"></label>
-</section>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tabIn" aria-selected="true">Sign in</button>
+    <button type="button" role="tab" id="tabUp" aria-selected="false">Create account</button>
+  </div>
 
-<section class="card">
-  <label class="field"><span>Frame size <small>(bigger helps small hands, slower)</small></span>
-    <select id="maxSide"><option>384</option><option>512</option><option>768</option><option>1024</option></select></label>
-  <label class="row"><span>Mirror frames <small>(try if letters come out wrong)</small></span><span class="switch"><input type="checkbox" id="mirror"><span></span></span></label>
-</section>
+  <button class="gbtn" id="google" type="button">
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.2 5.5-4.7 7.2l7.3 5.7c4.3-4 6.7-9.9 6.7-17.4z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+    <span id="googleLabel">Continue with Google</span>
+  </button>
+  <div class="or"><span>or use email</span></div>
 
-<p class="hint">Alt+Shift+I turns Abhivyakta on or off. Drag the panel by its header, resize it from the corner, double-click the header to snap it back under the video.</p>
+  <form id="form" novalidate>
+    <label class="in" id="nameRow" hidden><span>Full name</span><input id="name" autocomplete="name" maxlength="80" placeholder="Priya Sharma"></label>
+    <label class="in"><span>Email</span><input id="email" type="email" autocomplete="email" placeholder="you@example.com"></label>
+    <label class="in"><span>Password</span><input id="password" type="password" autocomplete="current-password" maxlength="128" placeholder="At least 8 characters"></label>
+    <label class="in" id="confirmRow" hidden><span>Confirm password</span><input id="confirm" type="password" autocomplete="new-password" maxlength="128" placeholder="Repeat password"></label>
+    <p class="error" id="error" role="alert" hidden></p>
+    <button class="primary" id="submit" type="submit">Sign in</button>
+  </form>
+</main>
+
+<!-- Signed in: settings -->
+<main id="appView" hidden>
+  <header>
+    <img class="mark" src="../icons/mark.png" alt="" width="36" height="36">
+    <div><h1>Abhivyakti</h1><p>Offline · On-device · ISL</p></div>
+    <label class="switch" title="Turn translation on or off"><input type="checkbox" id="enabled"><span></span></label>
+  </header>
+
+  <section class="card user">
+    <img id="avatar" alt="" hidden referrerpolicy="no-referrer"><div id="avatarFallback" class="avatar"></div>
+    <div class="who"><b id="userName"></b><small id="userEmail"></small></div>
+    <button class="linkbtn" id="signOut" type="button">Sign out</button>
+  </section>
+
+  <section class="card">
+    <label class="field"><span>Appearance</span>
+      <select id="theme"><option value="system">System default</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <label class="field"><span>Which videos</span>
+      <select id="mode"><option value="all">All visible videos (up to 4, e.g. Meet)</option><option value="largest">Largest video only (faster)</option></select></label>
+    <label class="row"><span>Mirror frames <small>(try if letters come out wrong)</small></span><span class="switch"><input type="checkbox" id="mirror"><span></span></span></label>
+  </section>
+
+  <p class="hint">Alt+Shift+I turns Abhivyakti on or off. Drag the panel by its header, resize it from the corner, double-click the header to snap it back under the video.</p>
+</main>
 <script src="popup.js"></script>

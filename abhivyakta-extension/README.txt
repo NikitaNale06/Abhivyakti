@@ -8,13 +8,17 @@ INSTALL
 4. Open a YouTube video / Google Meet and play it. The Abhivyakta panel appears under the video.
    After editing any file: click the reload arrow on the extension AND refresh the page.
 
+SIGN IN
+- Click the extension icon and sign in (Google or email + password, or "Create account").
+  Abhivyakti does nothing until you are signed in.
+
 THE PANEL
 - Type / edit freely in the text box; Enter = new line. Detected letters are inserted at your cursor.
 - Drag the header to move it anywhere. Double-click the header (or the dock button) to snap it back under the video.
 - Drag the bottom-right corner to resize. The size follows the video when its size changes (e.g. Meet tiles).
 - Buttons: backspace, clear, copy, save (.txt download), minimize.
 - Minimize turns it into an orange pill at the video's bottom-left; it keeps translating. Click it to reopen.
-- Click the extension icon for settings: theme (System/Light/Dark), confidence, hold time, space pause, frame size, mirror.
+- Click the extension icon for settings: theme (System/Light/Dark), which videos, mirror frames.
 - Alt+Shift+I turns Abhivyakta on/off.
 
 IF SOMETHING FAILS

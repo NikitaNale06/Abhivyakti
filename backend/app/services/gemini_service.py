@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Client setup & Direct API Fallback
 # ---------------------------------------------------------------------------
-GEMINI_MODEL = "gemini-3-flash-preview"
+GEMINI_MODEL = "gemini-flash-lite-latest"
 
 def _get_api_key() -> str:
     key = os.getenv("GEMINI_API_KEY", "")
@@ -62,7 +62,7 @@ def _call_gemini(prompt: str, model: str = GEMINI_MODEL) -> str:
     import urllib.error
 
     payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
-    candidate_models = [model, "gemini-3-flash-preview", "gemini-flash-latest"]
+    candidate_models = [model, "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3-flash-preview"]
     seen = set()
     last_error = None
 
