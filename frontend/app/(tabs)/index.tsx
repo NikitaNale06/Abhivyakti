@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/context/ThemeContext';
+import { useAuth } from '@/context/AuthContext';
 import { Screen } from '@/components/Screen';
 import { Card } from '@/components/Card';
 import { spacing, radius } from '@/theme/spacing';
@@ -10,14 +11,23 @@ import { typography } from '@/theme/typography';
 
 export default function Home() {
   const { colors } = useTheme();
+  const { user } = useAuth();
   const router = useRouter();
+
+  const greetingName = user?.display_name
+    ? user.display_name.split(' ')[0]
+    : user?.email
+    ? user.email.split('@')[0]
+    : null;
 
   return (
     <Screen edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: spacing.xxxl }}>
         <View style={styles.header}>
           <View>
-            <Text style={[typography.caption, { color: colors.textSecondary }]}>Namaste 🙏</Text>
+            <Text style={[typography.caption, { color: colors.textSecondary }]}>
+              {greetingName ? `Namaste, ${greetingName} 🙏` : 'Namaste 🙏'}
+            </Text>
             <Text style={[typography.h1, { color: colors.textPrimary, marginTop: 2 }]}>
               Ready to sign?
             </Text>
@@ -44,6 +54,66 @@ export default function Home() {
             <View style={styles.heroIcon}>
               <Ionicons name="scan" size={26} color="#FFFFFF" />
             </View>
+          </View>
+        </Pressable>
+
+        {/* ── AI Personalized ISL Academy Banner ── */}
+        <Pressable
+          onPress={() => router.push('/ai-learn')}
+          style={({ pressed }) => [
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.primary,
+              borderWidth: 2,
+              borderRadius: radius.lg,
+              padding: spacing.lg,
+              marginTop: spacing.md,
+              opacity: pressed ? 0.9 : 1,
+              shadowColor: colors.primary,
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: 0.15,
+              shadowRadius: 8,
+              elevation: 4,
+            },
+          ]}
+          accessibilityLabel="AI ISL Personalized Learning Academy"
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 }}>
+              <View
+                style={{
+                  width: 50,
+                  height: 50,
+                  borderRadius: radius.md,
+                  backgroundColor: colors.primary,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="sparkles" size={26} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[typography.h3, { color: colors.textPrimary }]}>
+                    AI ISL Academy
+                  </Text>
+                  <View
+                    style={{
+                      backgroundColor: colors.primarySoft,
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: radius.pill,
+                    }}
+                  >
+                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }}>NEW</Text>
+                  </View>
+                </View>
+                <Text style={[typography.caption, { color: colors.textSecondary, marginTop: 3 }]}>
+                  Personalized Roadmap • 9 Modules • Quizzes & AI Tutor
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward-circle" size={28} color={colors.primary} />
           </View>
         </Pressable>
 

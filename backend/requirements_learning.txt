@@ -1,0 +1,7 @@
+# Dependencies for AI-Powered ISL Learning Module in Abhivyakti
+# Install alongside existing requirements:
+# pip install -r requirements_learning.txt
+
+google-genai>=1.0.0
+pydantic>=2.0.0
+fastapi>=0.100.0

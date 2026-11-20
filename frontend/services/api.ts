@@ -1,8 +1,4 @@
-import Constants from 'expo-constants';
-
-const API_BASE_URL =
-  (Constants.expoConfig?.extra?.apiUrl as string | undefined) ??
-  'http://127.0.0.1:8000';
+const API_BASE_URL = 'https://abhivyakti-backend-486350221693.asia-south1.run.app';
 
 export interface PredictionAlternative {
   sign: string;

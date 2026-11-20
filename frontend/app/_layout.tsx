@@ -1,10 +1,14 @@
 import React from 'react';
+import { LogBox } from 'react-native';
 import { Stack } from 'expo-router';
+
+LogBox.ignoreLogs(['SafeAreaView has been deprecated']);
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { LanguageProvider } from '@/context/LanguageContext';
+import { AuthProvider } from '@/context/AuthContext';
 
 function RootStack() {
   const { colors, mode } = useTheme();
@@ -23,6 +27,7 @@ function RootStack() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="home" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="ai-learn" options={{ headerShown: false }} />
         <Stack.Screen name="lesson/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="learn-3d" options={{ headerShown: false }} />
         <Stack.Screen name="result" options={{ title: 'Result' }} />
@@ -38,7 +43,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ThemeProvider>
           <LanguageProvider>
-            <RootStack />
+            <AuthProvider>
+              <RootStack />
+            </AuthProvider>
           </LanguageProvider>
         </ThemeProvider>
       </SafeAreaProvider>

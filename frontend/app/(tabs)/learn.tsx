@@ -71,6 +71,45 @@ export default function Learn() {
           </Pressable>
         </View>
 
+        {/* AI ISL Academy Personalized Module Banner */}
+        <Pressable
+          onPress={() => router.push('/ai-learn')}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: colors.primarySoft,
+            borderColor: colors.primary,
+            borderWidth: 1.5,
+            borderRadius: radius.lg,
+            padding: spacing.md,
+            marginBottom: spacing.md,
+            gap: spacing.sm,
+          }}
+          accessibilityLabel="Open AI ISL Academy"
+        >
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: colors.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="sparkles" size={22} color="#FFFFFF" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[typography.bodyStrong, { color: colors.textPrimary }]}>
+              AI ISL Academy
+            </Text>
+            <Text style={[typography.caption, { color: colors.textSecondary }]}>
+              Personalized roadmap, lessons, quizzes & XP
+            </Text>
+          </View>
+          <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />
+        </Pressable>
+
         {/* Top Category Switcher Tabs - Guarantees Numbers & Alphabets are immediately accessible */}
         <View
           style={[
